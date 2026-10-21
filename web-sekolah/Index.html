@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="theme-color" content="#11543f">
+  <meta name="description" content="Website resmi SD Negeri Semanu III, Gunungkidul: informasi sekolah, pengumuman, agenda, kalender pendidikan, prestasi, galeri, PPDB, dan kontak.">
+  <title>SD Negeri Semanu III - Website Resmi</title>
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div id="loading" class="loading" role="status" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Memuat data sekolah...</p>
+  </div>
+
+  <div id="errorState" class="loading hidden" role="alert">
+    <h2>Data gagal dimuat</h2>
+    <p id="errorMessage" class="muted"></p>
+    <button type="button" class="btn btn-primary" id="retryButton">Coba lagi</button>
+  </div>
+
+  <div id="app" class="hidden">
+    <a class="skip-link" href="#beranda">Langsung ke konten</a>
+
+    <header class="site-header" id="siteHeader">
+      <div class="container header-top">
+        <a class="brand" href="#beranda">
+          <span class="brand-mark" aria-hidden="true">SD3</span>
+          <span class="brand-text">
+            <strong id="brandName">SD Negeri Semanu III</strong>
+            <small>Gunungkidul, D.I. Yogyakarta</small>
+          </span>
+        </a>
+
+        <div class="search" role="search">
+          <label class="sr-only" for="searchInput">Cari informasi</label>
+          <input id="searchInput" type="search" placeholder="Cari pengumuman, agenda, prestasi..." autocomplete="off" aria-controls="searchResults">
+          <div id="searchResults" class="search-results hidden" role="listbox" aria-label="Hasil pencarian"></div>
+        </div>
+
+        <button type="button" id="navToggle" class="nav-toggle" aria-label="Buka menu navigasi" aria-expanded="false" aria-controls="nav">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+
+      <nav class="nav" id="nav" aria-label="Navigasi utama">
+        <div class="container nav-inner">
+          <a href="#beranda">Beranda</a>
+          <a href="#profil">Profil</a>
+          <a href="#pengumuman">Pengumuman</a>
+          <a href="#agenda">Agenda</a>
+          <a href="#kalender">Kalender</a>
+          <a href="#prestasi">Prestasi</a>
+          <a href="#galeri">Galeri</a>
+          <a href="#ppdb">PPDB</a>
+          <a href="#kontak">Kontak</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section id="beranda" class="hero">
+        <div class="container hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow eyebrow-light">Website Resmi Sekolah</p>
+            <h1 id="heroName">SD Negeri Semanu III</h1>
+            <p class="hero-tagline" id="heroTagline">Belajar dengan gembira, tumbuh dengan karakter.</p>
+            <div class="hero-actions">
+              <a class="btn btn-accent" href="#ppdb">Informasi PPDB</a>
+              <a class="btn btn-outline-light" href="#kontak">Hubungi Sekolah</a>
+            </div>
+            <ul class="hero-facts" id="heroFacts"></ul>
+          </div>
+
+          <aside class="hero-card" aria-label="Informasi singkat sekolah">
+            <h2>Informasi Sekolah</h2>
+            <dl id="heroInfo" class="fact-list"></dl>
+            <p class="hero-note">Data pada website ini masih berupa contoh untuk keperluan tugas akademik.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="pengumuman" class="section">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">Informasi Terbaru</p>
+            <h2>Pengumuman Sekolah</h2>
+            <p class="muted">Kabar terbaru seputar kegiatan, akademik, dan layanan sekolah.</p>
+          </header>
+          <div id="pengumumanList" class="grid grid-2"></div>
+        </div>
+      </section>
+
+      <section id="agenda" class="section section-alt">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">Jadwal Kegiatan</p>
+            <h2>Agenda Sekolah</h2>
+            <p class="muted">Kegiatan yang akan datang dan yang baru saja berlangsung.</p>
+          </header>
+          <div id="agendaList" class="timeline"></div>
+        </div>
+      </section>
+
+      <section id="kalender" class="section">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">Kalender Pendidikan</p>
+            <h2>Kalender Kegiatan dan Hari Libur</h2>
+            <p class="muted">Rekap tanggal penting sepanjang tahun ajaran berjalan.</p>
+          </header>
+          <div class="calendar-legend">
+            <span class="badge badge-kegiatan">Kegiatan</span>
+            <span class="badge badge-libur">Libur</span>
+          </div>
+          <div id="kalenderList" class="calendar-list"></div>
+        </div>
+      </section>
+
+      <section id="prestasi" class="section section-alt">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">Kebanggaan Sekolah</p>
+            <h2>Prestasi Siswa</h2>
+            <p class="muted">Capaian akademik dan nonakademik siswa SD Negeri Semanu III.</p>
+          </header>
+          <div id="prestasiList" class="grid grid-2"></div>
+        </div>
+      </section>
+
+      <section id="galeri" class="section">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">Dokumentasi</p>
+            <h2>Galeri Kegiatan</h2>
+            <p class="muted">Foto dan video kegiatan sekolah berdasarkan kategori dan tanggal.</p>
+          </header>
+          <div id="galeriFilter" class="chip-row" role="group" aria-label="Filter kategori galeri"></div>
+          <div id="galeriList" class="gallery"></div>
+        </div>
+      </section>
+
+      <section id="profil" class="section section-alt">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">Tentang Kami</p>
+            <h2>Profil Sekolah</h2>
+            <p class="muted">Visi, misi, tenaga pendidik, fasilitas, dan program sekolah.</p>
+          </header>
+
+          <div class="profil-grid">
+            <article class="card sambutan">
+              <h3>Sambutan Kepala Sekolah</h3>
+              <div id="sambutanText" class="prose"></div>
+              <p class="signature" id="kepalaSekolah"></p>
+            </article>
+            <div class="stack">
+              <article class="card">
+                <h3>Visi</h3>
+                <p id="visiText" class="prose"></p>
+              </article>
+              <article class="card">
+                <h3>Misi</h3>
+                <ol id="misiList" class="clean-list"></ol>
+              </article>
+            </div>
+          </div>
+
+          <div class="subsection" id="tenaga-pendidik">
+            <header class="subsection-head">
+              <h3>Tenaga Pendidik</h3>
+              <p class="muted">Guru dan tenaga kependidikan yang mendampingi siswa.</p>
+            </header>
+            <div class="table-wrap">
+              <table class="table" id="guruTable">
+                <thead>
+                  <tr><th>Nama</th><th>Jabatan</th><th>Bidang</th><th>NIP</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="subsection" id="fasilitas">
+            <header class="subsection-head">
+              <h3>Fasilitas</h3>
+              <p class="muted">Sarana pendukung kegiatan belajar dan pengembangan siswa.</p>
+            </header>
+            <div id="fasilitasGrid" class="grid grid-3"></div>
+          </div>
+
+          <div class="subsection" id="program">
+            <header class="subsection-head">
+              <h3>Program Sekolah</h3>
+              <p class="muted">Program unggulan dan kegiatan pembinaan siswa.</p>
+            </header>
+            <div id="programGrid" class="grid grid-3"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="ppdb" class="section">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">Penerimaan Siswa Baru</p>
+            <h2>Informasi PPDB</h2>
+            <p class="muted">Persyaratan, alur pendaftaran, dan jadwal penerimaan siswa baru.</p>
+          </header>
+
+          <div class="ppdb-grid">
+            <article class="card ppdb-status">
+              <span id="ppdbStatus" class="badge badge-lg">-</span>
+              <h3 id="ppdbTahun">PPDB</h3>
+              <dl id="ppdbInfo" class="fact-list"></dl>
+              <a class="btn btn-primary" href="#kontak">Tanya Panitia</a>
+            </article>
+            <article class="card">
+              <h3>Persyaratan</h3>
+              <ol id="ppdbSyarat" class="clean-list"></ol>
+            </article>
+            <article class="card">
+              <h3>Alur Pendaftaran</h3>
+              <ol id="ppdbAlur" class="clean-list clean-list-numbered"></ol>
+            </article>
+          </div>
+
+          <p id="ppdbCatatan" class="muted small"></p>
+        </div>
+      </section>
+
+      <section id="kontak" class="section section-alt">
+        <div class="container contact-grid">
+          <div>
+            <header class="section-head">
+              <p class="eyebrow">Hubungi Kami</p>
+              <h2>Kontak Sekolah</h2>
+              <p class="muted">Sampaikan pertanyaan Anda melalui informasi kontak atau formulir berikut.</p>
+            </header>
+            <ul id="kontakInfo" class="contact-list"></ul>
+            <div class="contact-actions">
+              <a id="mapsLink" class="btn btn-outline" href="#" target="_blank" rel="noopener">Lihat Lokasi di Google Maps</a>
+              <a id="waLink" class="btn btn-whatsapp hidden" href="#" target="_blank" rel="noopener">WhatsApp Sekolah</a>
+            </div>
+          </div>
+
+          <form id="kontakForm" class="card form" novalidate>
+            <h3>Formulir Kontak</h3>
+            <p class="muted small">Pesan yang dikirim akan tersimpan pada spreadsheet sekolah.</p>
+
+            <div class="field">
+              <label for="nama">Nama <span aria-hidden="true">*</span></label>
+              <input id="nama" name="nama" type="text" maxlength="80" required placeholder="Nama lengkap">
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label for="email">Email <span aria-hidden="true">*</span></label>
+                <input id="email" name="email" type="email" maxlength="120" required placeholder="nama@email.com">
+              </div>
+              <div class="field">
+                <label for="telepon">Telepon</label>
+                <input id="telepon" name="telepon" type="tel" maxlength="30" placeholder="08xxxxxxxxxx">
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="subjek">Subjek</label>
+              <input id="subjek" name="subjek" type="text" maxlength="120" placeholder="Contoh: Informasi PPDB">
+            </div>
+
+            <div class="field">
+              <label for="pesan">Pesan <span aria-hidden="true">*</span></label>
+              <textarea id="pesan" name="pesan" rows="4" maxlength="1500" required placeholder="Tulis pertanyaan atau pesan Anda"></textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="submitButton">Kirim Pesan</button>
+            <p class="form-note small muted">Data yang dikirim hanya digunakan untuk keperluan komunikasi sekolah.</p>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div class="footer-brand">
+          <strong>SD Negeri Semanu III</strong>
+          <p id="footerAddress" class="footer-address"></p>
+        </div>
+        <div class="footer-note">
+          <p class="disclaimer">Website ini merupakan prototipe untuk keperluan tugas akademik "Analisis Kebutuhan Website". Seluruh data, jadwal, dan informasi di dalamnya adalah data contoh dan bukan acuan resmi sekolah.</p>
+          <p class="small">&copy; <span id="tahun">2026</span> SD Negeri Semanu III. Dibangun dengan Google Apps Script.</p>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-labelledby="lightboxTitle">
+    <button type="button" class="lightbox-close" id="lightboxClose" aria-label="Tutup galeri">&times;</button>
+    <div class="lightbox-body">
+      <h3 id="lightboxTitle"></h3>
+      <div id="lightboxMedia" class="lightbox-media"></div>
+      <p id="lightboxDesc" class="muted"></p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>

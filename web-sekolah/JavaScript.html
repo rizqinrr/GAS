@@ -1,0 +1,791 @@
+<script>
+  (function () {
+    'use strict';
+
+    var DATA = null;
+    var SEARCH = [];
+    var searchHits = [];
+    var galeriById = {};
+    var galeriKategori = 'Semua';
+    var toastTimer = null;
+
+    var BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    var BULAN_SINGKAT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+    document.addEventListener('DOMContentLoaded', init);
+
+    /* ----------------------------------------------------------------
+     * Utilitas
+     * ---------------------------------------------------------------- */
+
+    function el(id) {
+      return document.getElementById(id);
+    }
+
+    function esc(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function nl2br(value) {
+      return esc(value).replace(/\r?\n/g, '<br>');
+    }
+
+    function lines(value) {
+      return String(value || '')
+        .split(/\r?\n/)
+        .map(function (line) { return line.trim(); })
+        .filter(Boolean);
+    }
+
+    function stripBullet(line) {
+      return line.replace(/^\s*(?:\d+[\.\)]|[-*])\s*/, '');
+    }
+
+    function parseDate(iso) {
+      var match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+      if (!match) return null;
+      return { y: Number(match[1]), m: Number(match[2]) - 1, d: Number(match[3]) };
+    }
+
+    function fmtDate(iso) {
+      var parts = parseDate(iso);
+      if (!parts) return esc(iso || '');
+      return parts.d + ' ' + BULAN[parts.m] + ' ' + parts.y;
+    }
+
+    function fmtDateShort(iso) {
+      var parts = parseDate(iso);
+      if (!parts) return { day: '--', month: '' };
+      return { day: String(parts.d), month: BULAN_SINGKAT[parts.m] };
+    }
+
+    function fmtRange(start, end) {
+      var a = parseDate(start);
+      var b = parseDate(end);
+      if (!a) return esc(start || '');
+      if (!b || start === end) return fmtDate(start);
+      if (a.y === b.y && a.m === b.m) {
+        return a.d + ' - ' + b.d + ' ' + BULAN[a.m] + ' ' + a.y;
+      }
+      return fmtDate(start) + ' - ' + fmtDate(end);
+    }
+
+    function todayISO() {
+      var now = new Date();
+      var month = String(now.getMonth() + 1);
+      var day = String(now.getDate());
+      return now.getFullYear() + '-' + (month.length < 2 ? '0' + month : month) + '-' + (day.length < 2 ? '0' + day : day);
+    }
+
+    function isPast(iso) {
+      return !!iso && iso < todayISO();
+    }
+
+    function emptyNote(text) {
+      return '<p class="empty-note">' + esc(text) + '</p>';
+    }
+
+    function initials(text) {
+      return String(text || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map(function (word) { return word.charAt(0).toUpperCase(); })
+        .join('');
+    }
+
+    /* ----------------------------------------------------------------
+     * Bootstrap & event
+     * ---------------------------------------------------------------- */
+
+    function init() {
+      bindEvents();
+      loadData();
+    }
+
+    function loadData() {
+      el('loading').classList.remove('hidden');
+      el('errorState').classList.add('hidden');
+      el('app').classList.add('hidden');
+
+      google.script.run
+        .withSuccessHandler(onData)
+        .withFailureHandler(onError)
+        .getBootstrapData();
+    }
+
+    function onData(data) {
+      DATA = data || {};
+      var profil = DATA.profil || {};
+
+      document.title = (profil.nama_sekolah || 'Website Sekolah') + ' - Website Resmi';
+      el('brandName').textContent = profil.nama_sekolah || 'Website Sekolah';
+      el('heroName').textContent = profil.nama_sekolah || 'Website Sekolah';
+      el('heroTagline').textContent = profil.tagline || 'Website resmi sekolah.';
+      el('footerAddress').textContent = profil.alamat || '';
+      el('tahun').textContent = new Date().getFullYear();
+      el('kepalaSekolah').textContent = profil.kepala_sekolah ? 'Kepala Sekolah, ' + profil.kepala_sekolah : '';
+
+      renderHeroInfo(profil);
+      renderHeroFacts(profil);
+      renderPengumuman(DATA.pengumuman || []);
+      renderAgenda(DATA.agenda || []);
+      renderKalender(DATA.kalender || []);
+      renderPrestasi(DATA.prestasi || []);
+      renderGaleri(DATA.galeri || []);
+      renderProfil(profil);
+      renderGuru(DATA.guru || []);
+      renderFasilitas(DATA.fasilitas || []);
+      renderProgram(DATA.program || []);
+      renderPPDB(DATA.ppdb || {});
+      renderKontak(profil);
+      buildSearchIndex(DATA);
+
+      el('loading').classList.add('hidden');
+      el('app').classList.remove('hidden');
+
+      if (window.location.hash) {
+        setTimeout(function () {
+          var target = document.getElementById(window.location.hash.slice(1));
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+      }
+
+      updateActiveNav();
+    }
+
+    function onError(err) {
+      el('loading').classList.add('hidden');
+      el('app').classList.add('hidden');
+      el('errorState').classList.remove('hidden');
+      el('errorMessage').textContent = (err && err.message ? err.message : 'Terjadi kesalahan yang tidak diketahui.') +
+        ' Pastikan database sudah dibuat dengan menjalankan setupDatabase() pada editor Apps Script.';
+    }
+
+    function bindEvents() {
+      el('retryButton').addEventListener('click', loadData);
+
+      el('navToggle').addEventListener('click', function () {
+        var nav = el('nav');
+        var open = nav.classList.toggle('open');
+        el('navToggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+
+      el('nav').addEventListener('click', function (event) {
+        if (event.target.tagName === 'A') {
+          el('nav').classList.remove('open');
+          el('navToggle').setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      el('searchInput').addEventListener('input', handleSearch);
+      el('searchResults').addEventListener('click', function (event) {
+        var button = event.target.closest('.search-item');
+        if (!button) return;
+        var hit = searchHits[Number(button.getAttribute('data-index'))];
+        if (hit) goToResult(hit);
+      });
+
+      document.addEventListener('click', function (event) {
+        if (!event.target.closest('.search')) {
+          el('searchResults').classList.add('hidden');
+        }
+      });
+
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+          el('searchResults').classList.add('hidden');
+          closeLightbox();
+          el('nav').classList.remove('open');
+          el('navToggle').setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      el('galeriFilter').addEventListener('click', function (event) {
+        var chip = event.target.closest('.chip');
+        if (!chip) return;
+        galeriKategori = chip.getAttribute('data-kategori');
+        renderGaleri((DATA && DATA.galeri) || []);
+      });
+
+      el('galeriList').addEventListener('click', function (event) {
+        var card = event.target.closest('.gallery-item');
+        if (!card) return;
+        var item = galeriById[card.getAttribute('data-id')];
+        if (item) openLightbox(item);
+      });
+
+      el('lightboxClose').addEventListener('click', closeLightbox);
+      el('lightbox').addEventListener('click', function (event) {
+        if (event.target === el('lightbox')) closeLightbox();
+      });
+
+      el('kontakForm').addEventListener('submit', handleSubmit);
+
+      window.addEventListener('scroll', throttle(updateActiveNav, 120), { passive: true });
+    }
+
+    function throttle(fn, wait) {
+      var last = 0;
+      var timer = null;
+      return function () {
+        var now = Date.now();
+        var remaining = wait - (now - last);
+        if (remaining <= 0) {
+          last = now;
+          fn();
+        } else if (!timer) {
+          timer = setTimeout(function () {
+            timer = null;
+            last = Date.now();
+            fn();
+          }, remaining);
+        }
+      };
+    }
+
+    /* ----------------------------------------------------------------
+     * Render: hero
+     * ---------------------------------------------------------------- */
+
+    function renderHeroInfo(profil) {
+      var items = [
+        ['Alamat', profil.alamat],
+        ['Telepon', profil.telepon],
+        ['Email', profil.email],
+        ['Jam Layanan', profil.jam_layanan]
+      ].filter(function (item) { return item[1]; });
+
+      el('heroInfo').innerHTML = items.map(function (item) {
+        return '<div><dt>' + esc(item[0]) + '</dt><dd>' + esc(item[1]) + '</dd></div>';
+      }).join('');
+    }
+
+    function renderHeroFacts(profil) {
+      var facts = [
+        profil.tahun_ajaran ? 'Tahun Ajaran ' + profil.tahun_ajaran : '',
+        profil.akreditasi ? 'Akreditasi ' + profil.akreditasi : '',
+        DATA.meta && DATA.meta.jumlahGuru ? DATA.meta.jumlahGuru + ' Tenaga Pendidik' : '',
+        profil.jumlah_siswa ? profil.jumlah_siswa + ' Siswa' : ''
+      ].filter(Boolean);
+
+      el('heroFacts').innerHTML = facts.map(function (fact) {
+        return '<li>' + esc(fact) + '</li>';
+      }).join('');
+    }
+
+    /* ----------------------------------------------------------------
+     * Render: pengumuman, agenda, kalender, prestasi
+     * ---------------------------------------------------------------- */
+
+    function renderPengumuman(items) {
+      var container = el('pengumumanList');
+      if (!items.length) {
+        container.innerHTML = emptyNote('Belum ada pengumuman.');
+        return;
+      }
+
+      container.innerHTML = items.map(function (item) {
+        var penting = item.penting === 'Ya';
+        var isi = item.isi || item.ringkasan || '';
+
+        return '<article class="card announcement" id="pengumuman-' + esc(item.id) + '">' +
+          '<div class="meta">' +
+            '<span class="badge">' + esc(item.kategori || 'Umum') + '</span>' +
+            (penting ? '<span class="badge badge-penting">Penting</span>' : '') +
+            '<time datetime="' + esc(item.tanggal) + '">' + fmtDate(item.tanggal) + '</time>' +
+          '</div>' +
+          '<h3>' + esc(item.judul) + '</h3>' +
+          '<p class="muted small">' + nl2br(item.ringkasan) + '</p>' +
+          (isi ? '<details><summary>Baca selengkapnya</summary><p>' + nl2br(isi) + '</p></details>' : '') +
+        '</article>';
+      }).join('');
+    }
+
+    function renderAgenda(items) {
+      var container = el('agendaList');
+      if (!items.length) {
+        container.innerHTML = emptyNote('Belum ada agenda kegiatan.');
+        return;
+      }
+
+      container.innerHTML = items.map(function (item) {
+        var date = fmtDateShort(item.tanggal_mulai);
+        var past = isPast(item.tanggal_selesai || item.tanggal_mulai);
+
+        return '<article class="timeline-item' + (past ? ' past' : '') + '" id="agenda-' + esc(item.id) + '">' +
+          '<div class="timeline-date"><strong>' + esc(date.day) + '</strong><span>' + esc(date.month) + '</span></div>' +
+          '<div class="timeline-body">' +
+            '<h3>' + esc(item.judul) + '</h3>' +
+            '<div class="timeline-meta">' +
+              '<span class="badge">' + esc(item.kategori || 'Kegiatan') + '</span>' +
+              '<span>' + fmtRange(item.tanggal_mulai, item.tanggal_selesai) + '</span>' +
+              (item.lokasi ? '<span>' + esc(item.lokasi) + '</span>' : '') +
+              (past ? '<span>Selesai</span>' : '') +
+            '</div>' +
+            (item.deskripsi ? '<p>' + nl2br(item.deskripsi) + '</p>' : '') +
+          '</div>' +
+        '</article>';
+      }).join('');
+    }
+
+    function renderKalender(items) {
+      var container = el('kalenderList');
+      if (!items.length) {
+        container.innerHTML = emptyNote('Belum ada data kalender pendidikan.');
+        return;
+      }
+
+      container.innerHTML = items.map(function (item) {
+        var date = fmtDateShort(item.tanggal);
+        var libur = item.jenis === 'Libur';
+
+        return '<article class="calendar-item" id="kalender-' + esc(item.id) + '">' +
+          '<div class="calendar-date"><strong>' + esc(date.day) + '</strong><span>' + esc(date.month) + '</span></div>' +
+          '<div>' +
+            '<h3>' + esc(item.judul) + '</h3>' +
+            (item.keterangan ? '<p>' + esc(item.keterangan) + '</p>' : '') +
+          '</div>' +
+          '<span class="badge ' + (libur ? 'badge-libur' : 'badge-kegiatan') + '">' + esc(item.jenis || 'Kegiatan') + '</span>' +
+        '</article>';
+      }).join('');
+    }
+
+    function renderPrestasi(items) {
+      var container = el('prestasiList');
+      if (!items.length) {
+        container.innerHTML = emptyNote('Belum ada data prestasi.');
+        return;
+      }
+
+      container.innerHTML = items.map(function (item) {
+        return '<article class="card achievement" id="prestasi-' + esc(item.id) + '">' +
+          '<div class="achievement-rank">' + esc(item.juara || 'Prestasi') + '</div>' +
+          '<div>' +
+            '<h3>' + esc(item.lomba) + '</h3>' +
+            '<p class="who">' + esc(item.nama) + (item.kelas ? ' &middot; Kelas ' + esc(item.kelas) : '') + '</p>' +
+            (item.deskripsi ? '<p>' + esc(item.deskripsi) + '</p>' : '') +
+            '<div class="achievement-meta">' +
+              '<span class="badge">' + esc(item.tingkat || 'Sekolah') + '</span>' +
+              '<span class="small muted">' + fmtDate(item.tanggal) + '</span>' +
+            '</div>' +
+          '</div>' +
+        '</article>';
+      }).join('');
+    }
+
+    /* ----------------------------------------------------------------
+     * Render: galeri
+     * ---------------------------------------------------------------- */
+
+    function renderGaleri(items) {
+      var filter = el('galeriFilter');
+      var categories = ['Semua'];
+
+      items.forEach(function (item) {
+        if (item.kategori && categories.indexOf(item.kategori) === -1) {
+          categories.push(item.kategori);
+        }
+      });
+
+      if (categories.indexOf(galeriKategori) === -1) {
+        galeriKategori = 'Semua';
+      }
+
+      filter.innerHTML = categories.map(function (kategori) {
+        return '<button type="button" class="chip' + (kategori === galeriKategori ? ' active' : '') +
+          '" data-kategori="' + esc(kategori) + '">' + esc(kategori) + '</button>';
+      }).join('');
+
+      galeriById = {};
+      var filtered = items.filter(function (item) {
+        return galeriKategori === 'Semua' || item.kategori === galeriKategori;
+      });
+
+      var container = el('galeriList');
+      if (!filtered.length) {
+        container.innerHTML = emptyNote('Belum ada dokumentasi pada kategori ini.');
+        return;
+      }
+
+      container.innerHTML = filtered.map(function (item, index) {
+        galeriById[item.id] = item;
+        var media = String(item.media_url || '');
+        var thumb = media
+          ? '<img src="' + esc(media) + '" alt="' + esc(item.judul) + '" loading="lazy">'
+          : '<span class="ph-label">' + esc(initials(item.kategori || item.judul)) + '</span>';
+
+        return '<button type="button" class="gallery-item" data-id="' + esc(item.id) + '" aria-label="Buka ' + esc(item.judul) + '">' +
+          '<div class="gallery-thumb ph-' + ((index % 6) + 1) + '">' + thumb +
+            '<span class="gallery-type">' + esc(item.tipe || 'Foto') + '</span>' +
+          '</div>' +
+          '<div class="gallery-info">' +
+            '<h3>' + esc(item.judul) + '</h3>' +
+            '<p><span>' + esc(item.kategori || 'Umum') + '</span><span>' + fmtDate(item.tanggal) + '</span></p>' +
+          '</div>' +
+        '</button>';
+      }).join('');
+    }
+
+    function openLightbox(item) {
+      el('lightboxTitle').textContent = item.judul || 'Dokumentasi';
+      el('lightboxDesc').textContent = item.deskripsi || '';
+      el('lightboxMedia').innerHTML = mediaHtml(item);
+      el('lightbox').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function mediaHtml(item) {
+      var url = String(item.media_url || '');
+
+      if (!url) {
+        return '<div class="lightbox-placeholder">Dokumentasi contoh.<br>Tautan media belum diisi pada spreadsheet.</div>';
+      }
+
+      if (item.tipe === 'Video') {
+        var youtube = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,})/.exec(url);
+        if (youtube) {
+          return '<iframe width="100%" height="360" src="https://www.youtube.com/embed/' + esc(youtube[1]) +
+            '" frameborder="0" allowfullscreen title="' + esc(item.judul) + '"></iframe>';
+        }
+        return '<div class="lightbox-placeholder">Video tersedia pada tautan berikut.<br>' +
+          '<a href="' + esc(url) + '" target="_blank" rel="noopener">Buka video</a></div>';
+      }
+
+      return '<img src="' + esc(url) + '" alt="' + esc(item.judul) + '">';
+    }
+
+    function closeLightbox() {
+      if (el('lightbox').classList.contains('hidden')) return;
+      el('lightbox').classList.add('hidden');
+      el('lightboxMedia').innerHTML = '';
+      document.body.style.overflow = '';
+    }
+
+    /* ----------------------------------------------------------------
+     * Render: profil
+     * ---------------------------------------------------------------- */
+
+    function renderProfil(profil) {
+      var paragraphs = String(profil.sambutan || '')
+        .split(/\n{2,}/)
+        .map(function (text) { return text.trim(); })
+        .filter(Boolean);
+
+      el('sambutanText').innerHTML = paragraphs.length
+        ? paragraphs.map(function (text) { return '<p>' + nl2br(text) + '</p>'; }).join('')
+        : '<p class="muted">Sambutan belum diisi.</p>';
+
+      el('visiText').textContent = profil.visi || 'Visi sekolah belum diisi.';
+
+      var misi = lines(profil.misi);
+      el('misiList').innerHTML = misi.length
+        ? misi.map(function (line) { return '<li>' + esc(stripBullet(line)) + '</li>'; }).join('')
+        : '<li class="muted">Misi sekolah belum diisi.</li>';
+    }
+
+    function renderGuru(items) {
+      var tbody = el('guruTable').querySelector('tbody');
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="muted">Data tenaga pendidik belum diisi.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = items.map(function (item) {
+        return '<tr>' +
+          '<td><strong>' + esc(item.nama) + '</strong></td>' +
+          '<td>' + esc(item.jabatan || '-') + '</td>' +
+          '<td>' + esc(item.mapel || '-') + '</td>' +
+          '<td>' + esc(item.nip || '-') + '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function renderFasilitas(items) {
+      var container = el('fasilitasGrid');
+      if (!items.length) {
+        container.innerHTML = emptyNote('Data fasilitas belum diisi.');
+        return;
+      }
+
+      container.innerHTML = items.map(function (item, index) {
+        return '<article class="card">' +
+          '<span class="badge">Fasilitas ' + String(index + 1).padStart(2, '0') + '</span>' +
+          '<h3 style="margin-top:10px">' + esc(item.nama) + '</h3>' +
+          '<p class="muted small">' + esc(item.deskripsi || '') + '</p>' +
+        '</article>';
+      }).join('');
+    }
+
+    function renderProgram(items) {
+      var container = el('programGrid');
+      if (!items.length) {
+        container.innerHTML = emptyNote('Data program sekolah belum diisi.');
+        return;
+      }
+
+      container.innerHTML = items.map(function (item, index) {
+        return '<article class="card">' +
+          '<span class="badge">Program ' + String(index + 1).padStart(2, '0') + '</span>' +
+          '<h3 style="margin-top:10px">' + esc(item.nama) + '</h3>' +
+          '<p class="muted small">' + esc(item.deskripsi || '') + '</p>' +
+        '</article>';
+      }).join('');
+    }
+
+    /* ----------------------------------------------------------------
+     * Render: PPDB & kontak
+     * ---------------------------------------------------------------- */
+
+    function renderPPDB(ppdb) {
+      var status = ppdb.status || 'Belum ada informasi';
+      var dibuka = status.toLowerCase().indexOf('buka') !== -1;
+
+      el('ppdbStatus').textContent = status;
+      el('ppdbStatus').className = 'badge badge-lg' + (dibuka ? '' : ' badge-penting');
+      el('ppdbTahun').textContent = 'PPDB ' + (ppdb.tahun_ajaran || '');
+
+      var info = [
+        ['Periode Pendaftaran', ppdb.periode],
+        ['Kuota', ppdb.kuota],
+        ['Biaya', ppdb.biaya],
+        ['Kontak Panitia', ppdb.kontak]
+      ].filter(function (row) { return row[1]; });
+
+      el('ppdbInfo').innerHTML = info.map(function (row) {
+        return '<div><dt>' + esc(row[0]) + '</dt><dd>' + esc(row[1]) + '</dd></div>';
+      }).join('');
+
+      var syarat = lines(ppdb.persyaratan);
+      el('ppdbSyarat').innerHTML = syarat.length
+        ? syarat.map(function (line) { return '<li>' + esc(stripBullet(line)) + '</li>'; }).join('')
+        : '<li class="muted">Persyaratan belum diisi.</li>';
+
+      var alur = lines(ppdb.alur);
+      el('ppdbAlur').innerHTML = alur.length
+        ? alur.map(function (line) { return '<li>' + esc(stripBullet(line)) + '</li>'; }).join('')
+        : '<li class="muted">Alur pendaftaran belum diisi.</li>';
+
+      el('ppdbCatatan').textContent = ppdb.catatan || '';
+    }
+
+    function renderKontak(profil) {
+      var items = [
+        ['Alamat', profil.alamat],
+        ['Telepon', profil.telepon],
+        ['Email', profil.email],
+        ['Jam Layanan', profil.jam_layanan],
+        ['Kepala Sekolah', profil.kepala_sekolah]
+      ].filter(function (row) { return row[1]; });
+
+      el('kontakInfo').innerHTML = items.map(function (row) {
+        var value = esc(row[1]);
+        if (row[0] === 'Email' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row[1])) {
+          value = '<a href="mailto:' + value + '">' + value + '</a>';
+        }
+        if (row[0] === 'Telepon' && String(row[1]).replace(/[^0-9+]/g, '').length >= 7) {
+          value = '<a href="tel:' + esc(String(row[1]).replace(/[^0-9+]/g, '')) + '">' + value + '</a>';
+        }
+        return '<li><span class="label">' + esc(row[0]) + '</span><span class="value">' + value + '</span></li>';
+      }).join('');
+
+      var maps = el('mapsLink');
+      if (profil.maps_url) {
+        maps.href = profil.maps_url;
+        maps.classList.remove('hidden');
+      } else {
+        maps.classList.add('hidden');
+      }
+
+      var wa = el('waLink');
+      var nomor = String(profil.whatsapp || '').replace(/[^0-9]/g, '');
+      if (nomor) {
+        if (nomor.charAt(0) === '0') nomor = '62' + nomor.slice(1);
+        wa.href = 'https://wa.me/' + nomor + '?text=' + encodeURIComponent('Halo, saya ingin bertanya mengenai informasi sekolah.');
+        wa.classList.remove('hidden');
+      } else {
+        wa.classList.add('hidden');
+      }
+    }
+
+    /* ----------------------------------------------------------------
+     * Pencarian
+     * ---------------------------------------------------------------- */
+
+    function buildSearchIndex(data) {
+      SEARCH = [];
+
+      (data.pengumuman || []).forEach(function (item) {
+        addSearch('Pengumuman', item.judul, (item.ringkasan || '') + ' ' + (item.isi || ''), 'pengumuman', 'pengumuman-' + item.id);
+      });
+      (data.agenda || []).forEach(function (item) {
+        addSearch('Agenda', item.judul, (item.deskripsi || '') + ' ' + (item.lokasi || ''), 'agenda', 'agenda-' + item.id);
+      });
+      (data.kalender || []).forEach(function (item) {
+        addSearch('Kalender', item.judul, (item.keterangan || '') + ' ' + (item.jenis || ''), 'kalender', 'kalender-' + item.id);
+      });
+      (data.prestasi || []).forEach(function (item) {
+        addSearch('Prestasi', item.lomba, (item.nama || '') + ' ' + (item.juara || '') + ' ' + (item.tingkat || ''), 'prestasi', 'prestasi-' + item.id);
+      });
+      (data.galeri || []).forEach(function (item) {
+        addSearch('Galeri', item.judul, (item.kategori || '') + ' ' + (item.deskripsi || ''), 'galeri', null);
+      });
+      (data.guru || []).forEach(function (item) {
+        addSearch('Tenaga Pendidik', item.nama, (item.jabatan || '') + ' ' + (item.mapel || ''), 'profil', 'tenaga-pendidik');
+      });
+      (data.fasilitas || []).forEach(function (item) {
+        addSearch('Fasilitas', item.nama, item.deskripsi || '', 'profil', 'fasilitas');
+      });
+      (data.program || []).forEach(function (item) {
+        addSearch('Program', item.nama, item.deskripsi || '', 'profil', 'program');
+      });
+
+      var ppdb = data.ppdb || {};
+      addSearch('PPDB', 'Informasi PPDB ' + (ppdb.tahun_ajaran || ''), (ppdb.persyaratan || '') + ' ' + (ppdb.alur || '') + ' ' + (ppdb.periode || ''), 'ppdb', null);
+
+      var profil = data.profil || {};
+      addSearch('Profil', 'Visi dan Misi Sekolah', (profil.visi || '') + ' ' + (profil.misi || ''), 'profil', null);
+      addSearch('Profil', 'Sambutan Kepala Sekolah', profil.sambutan || '', 'profil', null);
+      addSearch('Kontak', 'Kontak dan Lokasi Sekolah', (profil.alamat || '') + ' ' + (profil.telepon || '') + ' ' + (profil.email || ''), 'kontak', null);
+    }
+
+    function addSearch(kategori, judul, teks, section, targetId) {
+      SEARCH.push({
+        kategori: kategori,
+        judul: judul,
+        section: section,
+        targetId: targetId,
+        key: String(judul + ' ' + (teks || '')).toLowerCase()
+      });
+    }
+
+    function handleSearch() {
+      var query = el('searchInput').value.trim().toLowerCase();
+      var box = el('searchResults');
+
+      if (query.length < 2) {
+        box.classList.add('hidden');
+        box.innerHTML = '';
+        searchHits = [];
+        return;
+      }
+
+      searchHits = SEARCH.filter(function (item) {
+        return item.key.indexOf(query) !== -1;
+      }).slice(0, 8);
+
+      if (!searchHits.length) {
+        box.innerHTML = '<div class="search-empty">Tidak ada hasil untuk "' + esc(query) + '".</div>';
+      } else {
+        box.innerHTML = searchHits.map(function (item, index) {
+          return '<button type="button" class="search-item" data-index="' + index + '" role="option">' +
+            '<strong>' + esc(item.judul) + '</strong>' +
+            '<span>' + esc(item.kategori) + '</span>' +
+          '</button>';
+        }).join('');
+      }
+
+      box.classList.remove('hidden');
+    }
+
+    function goToResult(hit) {
+      el('searchResults').classList.add('hidden');
+      var target = (hit.targetId && document.getElementById(hit.targetId)) || document.getElementById(hit.section);
+      if (!target) return;
+
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      target.classList.remove('flash');
+      void target.offsetWidth;
+      target.classList.add('flash');
+      setTimeout(function () { target.classList.remove('flash'); }, 1800);
+    }
+
+    function updateActiveNav() {
+      var sections = ['beranda', 'profil', 'pengumuman', 'agenda', 'kalender', 'prestasi', 'galeri', 'ppdb', 'kontak'];
+      var active = sections[0];
+
+      sections.forEach(function (id) {
+        var node = document.getElementById(id);
+        if (node && node.getBoundingClientRect().top <= 170) active = id;
+      });
+
+      Array.prototype.forEach.call(document.querySelectorAll('.nav-inner a'), function (link) {
+        link.classList.toggle('active', link.getAttribute('href') === '#' + active);
+      });
+    }
+
+    /* ----------------------------------------------------------------
+     * Form kontak
+     * ---------------------------------------------------------------- */
+
+    function handleSubmit(event) {
+      event.preventDefault();
+
+      var payload = {
+        nama: el('nama').value,
+        email: el('email').value,
+        telepon: el('telepon').value,
+        subjek: el('subjek').value,
+        pesan: el('pesan').value
+      };
+
+      ['nama', 'email', 'pesan'].forEach(function (id) {
+        el(id).classList.remove('invalid');
+      });
+
+      if (payload.nama.trim().length < 3) {
+        el('nama').classList.add('invalid');
+        showToast('Nama minimal 3 karakter.', true);
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(payload.email.trim())) {
+        el('email').classList.add('invalid');
+        showToast('Format email belum benar.', true);
+        return;
+      }
+      if (payload.pesan.trim().length < 10) {
+        el('pesan').classList.add('invalid');
+        showToast('Isi pesan minimal 10 karakter.', true);
+        return;
+      }
+
+      var button = el('submitButton');
+      button.disabled = true;
+      button.textContent = 'Mengirim...';
+
+      google.script.run
+        .withSuccessHandler(function (result) {
+          button.disabled = false;
+          button.textContent = 'Kirim Pesan';
+
+          if (result && result.ok) {
+            el('kontakForm').reset();
+            showToast(result.message || 'Pesan berhasil dikirim.');
+          } else {
+            showToast((result && result.message) || 'Pesan gagal dikirim.', true);
+          }
+        })
+        .withFailureHandler(function (err) {
+          button.disabled = false;
+          button.textContent = 'Kirim Pesan';
+          showToast('Pesan gagal dikirim: ' + (err && err.message ? err.message : 'kesalahan tidak diketahui'), true);
+        })
+        .submitPesan(payload);
+    }
+
+    function showToast(message, isError) {
+      var toast = el('toast');
+      toast.textContent = message;
+      toast.className = 'toast' + (isError ? ' error' : '');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () {
+        toast.classList.add('hidden');
+      }, 4500);
+    }
+  })();
+</script>
