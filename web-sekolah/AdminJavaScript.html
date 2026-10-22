@@ -1,0 +1,605 @@
+<script>
+  (function () {
+    'use strict';
+
+    var TOKEN_KEY = 'adminToken';
+    var CURRENT_KEY = 'adminCurrent';
+
+    /* ----------------------------------------------------------------
+     * Konfigurasi entitas
+     * ---------------------------------------------------------------- */
+
+    var ENTITIES = [
+      { key: 'Pengumuman', label: 'Pengumuman', idLabel: 'ID', cols: ['tanggal', 'judul', 'kategori', 'penting'], colsLabel: ['Tanggal', 'Judul', 'Kategori', 'Penting'] },
+      { key: 'Agenda', label: 'Agenda', idLabel: 'ID', cols: ['tanggal_mulai', 'tanggal_selesai', 'judul', 'kategori', 'lokasi'], colsLabel: ['Mulai', 'Selesai', 'Judul', 'Kategori', 'Lokasi'] },
+      { key: 'Kalender', label: 'Kalender', idLabel: 'ID', cols: ['tanggal', 'judul', 'jenis', 'keterangan'], colsLabel: ['Tanggal', 'Judul', 'Jenis', 'Keterangan'] },
+      { key: 'Prestasi', label: 'Prestasi', idLabel: 'ID', cols: ['tanggal', 'nama', 'kelas', 'lomba', 'tingkat', 'juara'], colsLabel: ['Tanggal', 'Nama', 'Kelas', 'Lomba', 'Tingkat', 'Juara'] },
+      { key: 'Galeri', label: 'Galeri', idLabel: 'ID', cols: ['tanggal', 'judul', 'kategori', 'tipe', 'media_url'], colsLabel: ['Tanggal', 'Judul', 'Kategori', 'Tipe', 'URL Media'] },
+      { key: 'Guru', label: 'Guru', idLabel: 'ID', cols: ['nama', 'nip', 'jabatan', 'mapel'], colsLabel: ['Nama', 'NIP', 'Jabatan', 'Mapel'] },
+      { key: 'Fasilitas', label: 'Fasilitas', idLabel: 'ID', cols: ['nama', 'deskripsi'], colsLabel: ['Nama', 'Deskripsi'] },
+      { key: 'Program', label: 'Program', idLabel: 'ID', cols: ['nama', 'deskripsi'], colsLabel: ['Nama', 'Deskripsi'] },
+      { key: 'Profil', label: 'Profil', kv: true },
+      { key: 'PPDB', label: 'PPDB', kv: true },
+      { key: 'Pesan', label: 'Pesan', pesan: true, cols: ['timestamp', 'nama', 'email', 'subjek', 'status'], colsLabel: ['Waktu', 'Nama', 'Email', 'Subjek', 'Status'] }
+    ];
+
+    var FIELD_TYPES = {
+      tanggal: 'date',
+      tanggal_mulai: 'date',
+      tanggal_selesai: 'date',
+      penting: 'select:Tidak,Ya',
+      jenis: 'select:Kegiatan,Libur',
+      tipe: 'select:Foto,Video',
+      isi: 'textarea',
+      ringkasan: 'textarea',
+      deskripsi: 'textarea'
+    };
+
+    var state = {
+      token: '',
+      current: ENTITIES[0].key,
+      data: null
+    };
+
+    /* ----------------------------------------------------------------
+     * Util
+     * ---------------------------------------------------------------- */
+
+    function $(id) {
+      return document.getElementById(id);
+    }
+
+    function esc(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function toast(text, isError) {
+      var node = document.createElement('div');
+      node.className = 'toast' + (isError ? ' error' : '');
+      node.textContent = text;
+      $('toastRoot').appendChild(node);
+      setTimeout(function () {
+        node.remove();
+      }, 3200);
+    }
+
+    function showToastResult(result, fallbackOk) {
+      if (result && result.ok === false) {
+        toast(result.message || 'Gagal.', true);
+        return false;
+      }
+      toast(typeof result === 'string' ? result : (result && result.message) || fallbackOk || 'Berhasil.');
+      return true;
+    }
+
+    function guardRun(onError) {
+      return google.script.run
+        .withFailureHandler(function (err) {
+          $('loadingState').classList.add('hidden');
+          var message = (err && err.message) || 'Terjadi kesalahan.';
+          if (message.indexOf('Sesi admin berakhir') !== -1) {
+            handleAdminExpired();
+            return;
+          }
+          toast(message, true);
+          if (onError) onError();
+        });
+    }
+
+    function handleAdminExpired() {
+      toast('Sesi admin berakhir. Silakan login ulang.', true);
+      backToLogin();
+    }
+
+    /* ----------------------------------------------------------------
+     * Auth
+     * ---------------------------------------------------------------- */
+
+    function bindLogin() {
+      $('loginForm').addEventListener('submit', function (event) {
+        event.preventDefault();
+        var button = $('loginButton');
+        var password = $('passwordInput').value;
+        $('loginError').classList.add('hidden');
+        button.disabled = true;
+        button.textContent = 'Masuk...';
+
+        google.script.run
+          .withSuccessHandler(function (result) {
+            button.disabled = false;
+            button.textContent = 'Masuk';
+            if (result && result.ok) {
+              state.token = result.token;
+              sessionStorage.setItem(TOKEN_KEY, result.token);
+              enterApp();
+            } else {
+              var errorBox = $('loginError');
+              errorBox.textContent = (result && result.message) || 'Login gagal.';
+              errorBox.classList.remove('hidden');
+            }
+          })
+          .withFailureHandler(function (err) {
+            button.disabled = false;
+            button.textContent = 'Masuk';
+            var errorBox = $('loginError');
+            errorBox.textContent = (err && err.message) || 'Login gagal.';
+            errorBox.classList.remove('hidden');
+          })
+          .adminLogin(password);
+      });
+    }
+
+    function enterApp() {
+      $('loginView').classList.add('hidden');
+      $('appView').classList.remove('hidden');
+      renderTabs();
+
+      var saved = sessionStorage.getItem(CURRENT_KEY);
+      if (saved && ENTITIES.some(function (entity) {
+        return entity.key === saved;
+      })) {
+        state.current = saved;
+      }
+
+      activateTab(state.current);
+    }
+
+    function backToLogin() {
+      sessionStorage.removeItem(TOKEN_KEY);
+      state.token = '';
+      $('appView').classList.add('hidden');
+      $('loginView').classList.remove('hidden');
+      $('passwordInput').value = '';
+      $('passwordInput').focus();
+    }
+
+    /* ----------------------------------------------------------------
+     * Tabs & render
+     * ---------------------------------------------------------------- */
+
+    function renderTabs() {
+      $('tabs').innerHTML = ENTITIES.map(function (entity) {
+        return '<button type="button" class="tab" data-key="' + esc(entity.key) + '">' + esc(entity.label) + '</button>';
+      }).join('');
+    }
+
+    function activateTab(key) {
+      state.current = key;
+      sessionStorage.setItem(CURRENT_KEY, key);
+
+      Array.prototype.forEach.call($('tabs').children, function (tab) {
+        tab.classList.toggle('active', tab.getAttribute('data-key') === key);
+      });
+
+      var entity = entityByKey(key);
+      $('panelTitle').textContent = entity.label;
+      $('addButton').classList.toggle('hidden', !!(entity.kv || entity.pesan));
+
+      loadData();
+    }
+
+    function entityByKey(key) {
+      var found = null;
+      ENTITIES.forEach(function (entity) {
+        if (entity.key === key) found = entity;
+      });
+      return found;
+    }
+
+    function loadData() {
+      $('loadingState').classList.remove('hidden');
+      $('emptyState').classList.add('hidden');
+      $('kvBox').classList.add('hidden');
+      $('dataTable').classList.remove('hidden');
+      $('tableBody').innerHTML = '';
+
+      guardRun()
+        .withSuccessHandler(function (result) {
+          $('loadingState').classList.add('hidden');
+          if (!result) {
+            handleAdminExpired();
+            return;
+          }
+          state.data = result || { headers: [], rows: [] };
+          var entity = entityByKey(state.current);
+
+          if (entity.kv) {
+            renderKV(entity);
+          } else if (entity.pesan) {
+            renderPesan(entity);
+          } else {
+            renderTable(entity);
+          }
+        })
+        .adminList(state.current, state.token);
+    }
+
+    function renderTable(entity) {
+      var rows = state.data.rows || [];
+      var columns = entity.cols;
+
+      $('tableHead').innerHTML = '<tr><th>' + esc(entity.idLabel) + '</th>' +
+        columns.map(function (col, index) {
+          return '<th>' + esc(entity.colsLabel[index]) + '</th>';
+        }).join('') + '<th></th></tr>';
+
+      if (!rows.length) {
+        $('tableBody').innerHTML = '';
+        $('emptyState').classList.remove('hidden');
+        $('emptyState').textContent = 'Belum ada data. Klik "Tambah" untuk membuat baru.';
+        $('panelCount').textContent = '';
+        return;
+      }
+
+      $('panelCount').textContent = rows.length + ' data';
+      $('emptyState').classList.add('hidden');
+
+      $('tableBody').innerHTML = rows.map(function (row) {
+        return '<tr>' +
+          '<td><strong>' + esc(row.id) + '</strong></td>' +
+          columns.map(function (col) {
+            var value = row[col] || '';
+            return '<td class="wrap"' + (col === 'media_url' && value ? ' title="' + esc(value) + '"' : '') + '>' + esc(truncate(value)) + '</td>';
+          }).join('') +
+          '<td><div class="row-actions">' +
+          '<button type="button" class="btn ghost sm" data-edit="' + esc(row.id) + '">Edit</button>' +
+          '<button type="button" class="btn danger sm" data-delete="' + esc(row.id) + '">Hapus</button>' +
+          '</div></td></tr>';
+      }).join('');
+
+      Array.prototype.forEach.call($('tableBody').querySelectorAll('[data-edit]'), function (button) {
+        button.addEventListener('click', function () {
+          openForm(findRowById(button.getAttribute('data-edit')));
+        });
+      });
+
+      Array.prototype.forEach.call($('tableBody').querySelectorAll('[data-delete]'), function (button) {
+        button.addEventListener('click', function () {
+          confirmDelete(findRowById(button.getAttribute('data-delete')));
+        });
+      });
+    }
+
+    function truncate(value) {
+      var text = String(value || '');
+      return text.length > 90 ? text.slice(0, 90) + ' -' : text;
+    }
+
+    function findRowById(id) {
+      var rows = state.data.rows || [];
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i].id) === String(id)) return rows[i];
+      }
+      return null;
+    }
+
+    function renderKV(entity) {
+      var rows = state.data.rows || [];
+
+      $('dataTable').classList.add('hidden');
+      $('emptyState').classList.add('hidden');
+      $('kvBox').classList.remove('hidden');
+
+      $('panelTitle').textContent = entity.label + ' (kunci / nilai)';
+      $('panelCount').textContent = rows.length + ' kunci';
+      $('addButton').classList.add('hidden');
+
+      var box = $('kvBox');
+      box.innerHTML = '';
+
+      if (!rows.length) {
+        box.innerHTML = '<div class="empty">Belum ada kunci/nilai.</div>';
+        return;
+      }
+
+      var grid = document.createElement('div');
+      grid.className = 'kv-grid';
+      grid.innerHTML = rows.map(function (row) {
+        var multi = (row.nilai || '').length > 60 || (row.nilai || '').indexOf('\n') !== -1;
+        return '<div class="kv-item" data-kunci="' + esc(row.kunci) + '">' +
+          '<label>' + esc(row.kunci) + '</label>' +
+          (multi
+            ? '<textarea data-nilai="' + esc(row.kunci) + '">' + esc(row.nilai) + '</textarea>'
+            : '<input type="text" data-nilai="' + esc(row.kunci) + '" value="' + esc(row.nilai) + '">') +
+          '</div>';
+      }).join('');
+      box.appendChild(grid);
+
+      var saveBar = document.createElement('div');
+      saveBar.style.marginTop = '14px';
+      saveBar.innerHTML = '<button type="button" class="btn" id="saveKvButton">Simpan ' + esc(entity.label) + '</button>';
+      box.appendChild(saveBar);
+
+      $('saveKvButton').addEventListener('click', function () {
+        var payload = [];
+        Array.prototype.forEach.call(grid.querySelectorAll('[data-nilai]'), function (input) {
+          payload.push({
+            kunci: input.getAttribute('data-nilai'),
+            nilai: input.value
+          });
+        });
+        guardRun().withSuccessHandler(function (result) {
+          showToastResult(result, 'Perubahan disimpan.');
+        }).adminSaveKV(state.current, payload, state.token);
+      });
+    }
+
+    function renderPesan(entity) {
+      var rows = state.data.rows || [];
+
+      $('tableHead').innerHTML = '<tr>' +
+        entity.cols.map(function (col, index) {
+          return '<th>' + esc(entity.colsLabel[index]) + '</th>';
+        }).join('') + '<th></th></tr>';
+
+      $('panelTitle').textContent = 'Pesan masuk';
+      $('addButton').classList.add('hidden');
+
+      if (!rows.length) {
+        $('tableBody').innerHTML = '';
+        $('emptyState').classList.remove('hidden');
+        $('emptyState').textContent = 'Belum ada pesan masuk.';
+        $('panelCount').textContent = '';
+        return;
+      }
+
+      $('panelCount').textContent = rows.length + ' pesan';
+      $('emptyState').classList.add('hidden');
+
+      $('tableBody').innerHTML = rows.map(function (row) {
+        var badge = row.status === 'Baru' ? 'badge warn' : 'badge';
+        return '<tr>' +
+          '<td class="wrap">' + esc(row.timestamp) + '</td>' +
+          '<td class="wrap">' + esc(row.nama) + '<br><small>' + esc(row.email) + (row.telepon ? ' / ' + esc(row.telepon) : '') + '</small></td>' +
+          '<td class="wrap">' + esc(row.email) + '</td>' +
+          '<td class="wrap">' + esc(truncate(row.subjek)) + '<br><small>' + esc(truncate(row.pesan)) + '</small></td>' +
+          '<td><span class="' + badge + '">' + esc(row.status || 'Baru') + '</span></td>' +
+          '<td><div class="row-actions">' +
+          '<button type="button" class="btn ghost sm" data-status="' + row._row + '" data-now="' + esc(row.status || 'Baru') + '">' + (row.status === 'Sudah dibalas' ? 'Set Baru' : 'Sudah dibalas') + '</button>' +
+          '<a class="btn ghost sm" href="mailto:' + esc(row.email) + '">Balas</a>' +
+          '<button type="button" class="btn danger sm" data-hapuspesan="' + row._row + '">Hapus</button>' +
+          '</div></td></tr>';
+      }).join('');
+
+      Array.prototype.forEach.call($('tableBody').querySelectorAll('[data-status]'), function (button) {
+        button.addEventListener('click', function () {
+          var rowNumber = button.getAttribute('data-status');
+          var statusNext = button.getAttribute('data-now') === 'Sudah dibalas' ? 'Baru' : 'Sudah dibalas';
+          guardRun().withSuccessHandler(function (result) {
+            if (showToastResult(result, 'Status diperbarui.')) {
+              loadData();
+            }
+          }).adminSetPesanStatus(rowNumber, statusNext, state.token);
+        });
+      });
+
+      Array.prototype.forEach.call($('tableBody').querySelectorAll('[data-hapuspesan]'), function (button) {
+        button.addEventListener('click', function () {
+          confirmDeletePesan(Number(button.getAttribute('data-hapuspesan')));
+        });
+      });
+    }
+
+    /* ----------------------------------------------------------------
+     * Form modal (create/update)
+     * ---------------------------------------------------------------- */
+
+    function openForm(record) {
+      var entity = entityByKey(state.current);
+      var isEdit = !!record;
+      var headers = (state.data && state.data.headers) || [];
+      var fields = headers.filter(function (header) {
+        return header !== 'id';
+      });
+
+      var inputs = fields.map(function (field) {
+        return fieldHtml(field, isEdit ? record[field] : '', FIELD_TYPES[field]);
+      }).join('');
+
+      openModal(
+        '<form id="modalForm">' +
+        '<h3>' + (isEdit ? 'Edit - ' + esc(record.id) : 'Tambah ' + esc(entity.label)) + '</h3>' +
+        '<p class="sub">Tanggal memakai format YYYY-MM-DD.</p>' +
+        '<div class="form-cols">' + inputs + '</div>' +
+        '<div class="foot">' +
+        '<button type="button" class="btn ghost" id="modalCancel">Batal</button>' +
+        '<button type="submit" class="btn" id="modalSave">Simpan</button>' +
+        '</div></form>'
+      );
+
+      $('modalCancel').addEventListener('click', closeModal);
+
+      $('modalForm').addEventListener('submit', function (event) {
+        event.preventDefault();
+        var payload = isEdit ? { id: record.id } : {};
+
+        Array.prototype.forEach.call(fields, function (field) {
+          var input = $('fieldInput_' + field);
+          payload[field] = input && input.value != null ? input.value : '';
+        });
+
+        var saveButton = $('modalSave');
+        saveButton.disabled = true;
+        saveButton.textContent = 'Simpan...';
+
+        guardRun(function () {
+          saveButton.disabled = false;
+          saveButton.textContent = 'Simpan';
+        }).withSuccessHandler(function (result) {
+          if (result && result.ok === false) {
+            saveButton.disabled = false;
+            saveButton.textContent = 'Simpan';
+            toast(result.message || 'Gagal disimpan.', true);
+            return;
+          }
+          closeModal();
+          if (typeof result === 'string' || !result) {
+            toast('Sesi berakhir. Silakan login ulang.', true);
+            return;
+          }
+          toast(isEdit ? 'Data diperbarui.' : 'Data ditambahkan.');
+          loadData();
+        }).adminSave(state.current, payload, state.token);
+      });
+    }
+
+    function fieldHtml(field, value, type) {
+      var long = type === 'textarea' ||
+        (!type && String(value || '').length > 60) ||
+        (!type && String(value || '').indexOf('\n') !== -1);
+
+      var input;
+      if (type === 'date') {
+        input = '<input id="fieldInput_' + field + '" type="date" value="' + esc(value) + '">';
+      } else if (type && type.indexOf('select:') === 0) {
+        var options = type.slice(7).split(',');
+        input = '<select id="fieldInput_' + field + '">' +
+          options.map(function (option) {
+            return '<option value="' + esc(option) + '"' + (option === value ? ' selected' : '') + '>' + esc(option) + '</option>';
+          }).join('') +
+          '</select>';
+      } else if (long) {
+        input = '<textarea id="fieldInput_' + field + '">' + esc(value) + '</textarea>';
+      } else {
+        input = '<input id="fieldInput_' + field + '" type="text" value="' + esc(value) + '">';
+      }
+
+      var full = long ? ' class="full"' : '';
+      return '<div class="field"' + full + '><label>' + esc(field) + '</label>' + input + '</div>';
+    }
+
+    function confirmDelete(record) {
+      if (!record) return;
+      var entity = entityByKey(state.current);
+      openModal(
+        '<h3>Hapus data?</h3>' +
+        '<p class="sub">ID ' + esc(record.id) + ' pada ' + esc(entity.label) + ' akan dihapus permanen. Salinan tersimpan di sheet Log.</p>' +
+        '<div class="foot">' +
+        '<button type="button" class="btn ghost" id="modalCancel">Batal</button>' +
+        '<button type="button" class="btn danger" id="modalDelete">Hapus</button>' +
+        '</div>'
+      );
+
+      $('modalCancel').addEventListener('click', closeModal);
+      $('modalDelete').addEventListener('click', function () {
+        var button = $('modalDelete');
+        button.disabled = true;
+        button.textContent = 'Menghapus...';
+
+        guardRun(function () {
+          button.disabled = false;
+          button.textContent = 'Hapus';
+        }).withSuccessHandler(function (result) {
+          if (showToastResult(result, 'Data dihapus.')) {
+            closeModal();
+          } else {
+            button.disabled = false;
+            button.textContent = 'Hapus';
+          }
+          loadData();
+        }).adminDelete(state.current, record.id, state.token);
+      });
+    }
+
+    function confirmDeletePesan(rowNumber) {
+      openModal(
+        '<h3>Hapus pesan?</h3>' +
+        '<p class="sub">Pesan ini akan dihapus permanen. Salinan tersimpan di sheet Log.</p>' +
+        '<div class="foot">' +
+        '<button type="button" class="btn ghost" id="modalCancel">Batal</button>' +
+        '<button type="button" class="btn danger" id="modalDelete">Hapus</button>' +
+        '</div>'
+      );
+
+      $('modalCancel').addEventListener('click', closeModal);
+      $('modalDelete').addEventListener('click', function () {
+        var button = $('modalDelete');
+        button.disabled = true;
+        button.textContent = 'Menghapus...';
+
+        guardRun(function () {
+          button.disabled = false;
+          button.textContent = 'Hapus';
+        }).withSuccessHandler(function (result) {
+          if (showToastResult(result, 'Pesan dihapus.')) {
+            closeModal();
+          } else {
+            button.disabled = false;
+            button.textContent = 'Hapus';
+          }
+          loadData();
+        }).adminDeletePesan(rowNumber, state.token);
+      });
+    }
+
+    function openModal(html) {
+      $('modalRoot').innerHTML =
+        '<div class="overlay" id="modalOverlay"><div class="modal" role="dialog" aria-modal="true">' + html + '</div></div>';
+      $('modalOverlay').addEventListener('click', function (event) {
+        if (event.target === $('modalOverlay')) closeModal();
+      });
+    }
+
+    function closeModal() {
+      $('modalRoot').innerHTML = '';
+    }
+
+    /* ----------------------------------------------------------------
+     * Binding global
+     * ---------------------------------------------------------------- */
+
+    document.addEventListener('click', function (event) {
+      var tab = event.target.closest ? event.target.closest('.tab') : null;
+      if (tab) activateTab(tab.getAttribute('data-key'));
+    });
+
+    function bindShell() {
+      $('reloadButton').addEventListener('click', loadData);
+      $('addButton').addEventListener('click', function () {
+        openForm(null);
+      });
+
+      $('logoutButton').addEventListener('click', function () {
+        guardRun(backToLogin).withSuccessHandler(function () {
+          backToLogin();
+        }).adminLogout(state.token);
+      });
+
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') closeModal();
+      });
+    }
+
+    /* ----------------------------------------------------------------
+     * Init
+     * ---------------------------------------------------------------- */
+
+    document.addEventListener('DOMContentLoaded', function () {
+      bindLogin();
+      bindShell();
+
+      var savedToken = sessionStorage.getItem(TOKEN_KEY);
+      if (savedToken) {
+        state.token = savedToken;
+        google.script.run
+          .withSuccessHandler(function (result) {
+            if (result && result && result.ok) {
+              state.token = savedToken;
+              enterApp();
+            } else {
+              sessionStorage.removeItem(TOKEN_KEY);
+            }
+          })
+          .withFailureHandler(function () {
+            sessionStorage.removeItem(TOKEN_KEY);
+          })
+          .adminSession(savedToken);
+      }
+    });
+  })();
+</script>

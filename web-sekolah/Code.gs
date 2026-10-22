@@ -1,4 +1,4 @@
-/**
+﻿/**
  * =====================================================================
  * WEBSITE SEKOLAH - SD NEGERI SEMANU III
  * Google Apps Script (Web App) + Google Sheets sebagai database
@@ -13,15 +13,16 @@
  *   3. Jalankan setupDatabase() satu kali, izinkan akses.
  *   4. Deploy > New deployment > Web app.
  *
- * Versi: 1.0.0
+ * Versi: 1.2.0
  * =====================================================================
  */
 
 var APP = {
   nama: 'SD Negeri Semanu III',
-  versi: '1.0.0',
+  versi: '1.2.0',
   timezone: 'Asia/Jakarta',
   dbName: 'DB - Website SD Negeri Semanu III',
+  dbFolderId: '',
   cacheKey: 'BOOTSTRAP_V1',
   cacheSeconds: 120,
   maxPesanPerJam: 3
@@ -38,7 +39,16 @@ var SCHEMA = {
   Fasilitas: ['id', 'nama', 'deskripsi'],
   Program: ['id', 'nama', 'deskripsi'],
   PPDB: ['kunci', 'nilai'],
-  Pesan: ['timestamp', 'nama', 'email', 'telepon', 'subjek', 'pesan', 'status']
+  Pesan: ['timestamp', 'nama', 'email', 'telepon', 'subjek', 'pesan', 'status'],
+  Log: ['timestamp', 'aksi', 'entitas', 'id', 'detail']
+};
+
+var ADMIN = {
+  sessionSeconds: 21600,
+  maxLoginFails: 5,
+  loginFailSeconds: 900,
+  tokenPrefix: 'ADMIN_TOKEN_',
+  logSheet: 'Log'
 };
 
 /* =====================================================================
@@ -46,7 +56,21 @@ var SCHEMA = {
  * ===================================================================== */
 
 function doGet(e) {
-  ensureDatabase_();
+  var params = (e && e.parameter) || {};
+
+  try {
+    ensureDatabase_();
+  } catch (err) {
+    console.error('ensureDatabase_ gagal: ' + err.message + '\n' + (err.stack || ''));
+  }
+
+  if (params.page === 'admin') {
+    return HtmlService.createTemplateFromFile('Admin')
+      .evaluate()
+      .setTitle('Admin - ' + APP.nama)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
 
   var template = HtmlService.createTemplateFromFile('Index');
   template.tahun = new Date().getFullYear();
@@ -93,6 +117,7 @@ function setupDatabase() {
     try {
       var existing = SpreadsheetApp.openById(existingId);
       ensureSheets_(existing);
+      moveDbToFolder_(existing);
       Logger.log('Database sudah tersedia: ' + existing.getUrl());
       return { created: false, id: existing.getId(), url: existing.getUrl() };
     } catch (err) {
@@ -107,6 +132,7 @@ function setupDatabase() {
   });
   seedData_(ss);
   removeExtraSheets_(ss);
+  moveDbToFolder_(ss);
 
   props.setProperty('DB_ID', ss.getId());
   invalidateCache_();
@@ -128,6 +154,124 @@ function showDatabaseUrl() {
 function refreshCache() {
   invalidateCache_();
   Logger.log('Cache dibersihkan. Muat ulang halaman web app.');
+}
+
+/**
+ * Menampilkan informasi database di Execution log: akun, URL spreadsheet,
+ * folder penyimpanan, dan daftar sheet. Berguna saat database "tidak ketemu".
+ */
+function cekDatabase() {
+  var ss = ensureDatabase_();
+  var sheets = ss.getSheets().map(function (sheet) {
+    return sheet.getName();
+  });
+  var folder = dbFolder_();
+
+  Logger.log('Akun: ' + Session.getEffectiveUser().getEmail());
+  Logger.log('Spreadsheet: ' + ss.getUrl());
+  Logger.log('Folder: ' + (folder ? folder.getName() + ' - ' + folder.getUrl() : '(My Drive / root)'));
+  Logger.log('Jumlah sheet: ' + sheets.length + ' -> ' + sheets.join(', '));
+  return ss.getUrl();
+}
+
+/**
+ * Menentukan folder database. Prioritas:
+ *   1. Script Property DB_FOLDER_ID
+ *   2. Konstanta APP.dbFolderId
+ *   3. Folder tempat project Apps Script berada
+ *   4. null (My Drive)
+ */
+function dbFolder_() {
+  var props = PropertiesService.getScriptProperties();
+  var folderId = folderIdFrom_(props.getProperty('DB_FOLDER_ID') || APP.dbFolderId);
+
+  if (folderId) {
+    try {
+      return DriveApp.getFolderById(folderId);
+    } catch (err) {
+      Logger.log('Folder database tidak ditemukan: ' + err.message);
+    }
+  }
+
+  try {
+    var parents = DriveApp.getFileById(ScriptApp.getScriptId()).getParents();
+    if (parents.hasNext()) {
+      return parents.next();
+    }
+  } catch (err) {
+    Logger.log('Tidak bisa membaca folder project: ' + err.message);
+  }
+
+  return null;
+}
+
+function moveDbToFolder_(ss) {
+  var folder;
+  try {
+    folder = dbFolder_();
+  } catch (err) {
+    Logger.log('Gagal menentukan folder database: ' + err.message);
+    return false;
+  }
+
+  if (!folder) {
+    Logger.log('Folder tujuan tidak ditemukan; database tetap di My Drive.');
+    return false;
+  }
+
+  try {
+    var file = DriveApp.getFileById(ss.getId());
+    var parents = file.getParents();
+
+    while (parents.hasNext()) {
+      if (parents.next().getId() === folder.getId()) {
+        return true;
+      }
+    }
+
+    file.moveTo(folder);
+    Logger.log('Database dipindahkan ke folder: ' + folder.getName());
+    return true;
+  } catch (err) {
+    Logger.log('Gagal memindahkan database: ' + err.message);
+    return false;
+  }
+}
+
+/**
+ * Memindahkan database ke folder tertentu.
+ * Jalankan dari editor: aturFolderDatabase('ID_FOLDER')
+ * atau tempel URL folder: aturFolderDatabase('https://drive.google.com/drive/folders/...').
+ * Jalankan aturFolderDatabase('') untuk kembali ke default.
+ */
+function aturFolderDatabase(folderId) {
+  var id = folderIdFrom_(folderId);
+  var props = PropertiesService.getScriptProperties();
+
+  if (!id) {
+    props.deleteProperty('DB_FOLDER_ID');
+    var current = ensureDatabase_();
+    moveDbToFolder_(current);
+    Logger.log('Pengaturan folder dihapus. Database mengikuti folder project (atau My Drive).');
+    Logger.log('Spreadsheet: ' + current.getUrl());
+    return current.getUrl();
+  }
+
+  var folder = DriveApp.getFolderById(id);
+  props.setProperty('DB_FOLDER_ID', id);
+
+  var ss = ensureDatabase_();
+  moveDbToFolder_(ss);
+
+  Logger.log('Folder database: ' + folder.getName() + ' - ' + folder.getUrl());
+  Logger.log('Spreadsheet: ' + ss.getUrl());
+  return ss.getUrl();
+}
+
+function folderIdFrom_(value) {
+  var str = String(value == null ? '' : value).trim();
+  var match = str.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : str;
 }
 
 function ensureSheets_(ss) {
@@ -358,6 +502,473 @@ function text_(value, max) {
 function cell_(value) {
   var str = text_(value, 2000).replace(/\r\n/g, '\n');
   return /^[=+\-@]/.test(str) ? "'" + str : str;
+}
+
+/* =====================================================================
+ * ADMIN: auth + CRUD
+ * ===================================================================== */
+
+var ADMIN_ENTITIES = {
+  Pengumuman: { idPrefix: 'P-', required: ['tanggal', 'judul'], dateFields: ['tanggal'] },
+  Agenda: { idPrefix: 'A-', required: ['tanggal_mulai', 'judul'], dateFields: ['tanggal_mulai', 'tanggal_selesai'] },
+  Kalender: { idPrefix: 'K-', required: ['tanggal', 'judul'], dateFields: ['tanggal'] },
+  Prestasi: { idPrefix: 'PR-', required: ['tanggal', 'nama'], dateFields: ['tanggal'] },
+  Galeri: { idPrefix: 'G-', required: ['tanggal', 'judul'], dateFields: ['tanggal'] },
+  Guru: { idPrefix: 'GURU-', required: ['nama'], dateFields: [] },
+  Fasilitas: { idPrefix: 'F-', required: ['nama'], dateFields: [] },
+  Program: { idPrefix: 'PRG-', required: ['nama'], dateFields: [] }
+};
+
+/**
+ * Dipanggil sekali dari editor Apps Script untuk mengatur password admin.
+ * Password disimpan sebagai SHA-256 hash + salt, bukan teks asli.
+ */
+function setAdminPassword(password) {
+  var str = String(password == null ? '' : password);
+  if (str.length < 6) {
+    throw new Error('Password minimal 6 karakter.');
+  }
+  var props = PropertiesService.getScriptProperties();
+  var salt = Utilities.getUuid();
+  props.setProperty('ADMIN_SALT', salt);
+  props.setProperty('ADMIN_HASH', hashAdminPassword_(salt, str));
+  logAdmin_('set_password', 'Admin', '', 'Password admin diperbarui.');
+  Logger.log('Password admin tersimpan. Login di /exec?page=admin');
+  return 'Password admin tersimpan.';
+}
+
+function adminLogin(password) {
+  var props = PropertiesService.getScriptProperties();
+  var storedHash = props.getProperty('ADMIN_HASH');
+  var storedSalt = props.getProperty('ADMIN_SALT');
+  var cache = CacheService.getScriptCache();
+  var failKey = 'ADMIN_LOGIN_FAILS';
+
+  var fails = Number(cache.get(failKey) || 0);
+  if (fails >= ADMIN.maxLoginFails) {
+    logAdmin_('login_diblokir', 'Admin', '', 'Terlalu banyak percobaan gagal.');
+    return {
+      ok: false,
+      message: 'Terlalu banyak percobaan gagal. Coba lagi sekitar ' +
+        Math.ceil(ADMIN.loginFailSeconds / 60) + ' menit.'
+    };
+  }
+
+  if (!storedHash || !storedSalt) {
+    return { ok: false, message: 'Password admin belum diatur. Jalankan setAdminPassword dari editor.' };
+  }
+
+  var attempt = hashAdminPassword_(storedSalt, String(password == null ? '' : password));
+  if (!safeEqual_(attempt, storedHash)) {
+    cache.put(failKey, String(fails + 1), ADMIN.loginFailSeconds);
+    logAdmin_('login_gagal', 'Admin', '', 'Password salah.');
+    return { ok: false, message: 'Password salah (percobaan ' + (fails + 1) + '/' + ADMIN.maxLoginFails + ').' };
+  }
+
+  cache.remove(failKey);
+  var token = Utilities.getUuid();
+  cache.put(ADMIN.tokenPrefix + token, '1', ADMIN.sessionSeconds);
+  logAdmin_('login', 'Admin', '', 'Login berhasil.');
+  return { ok: true, token: token, expiresInHours: ADMIN.sessionSeconds / 3600 };
+}
+
+function adminLogout(token) {
+  CacheService.getScriptCache().remove(ADMIN.tokenPrefix + String(token || ''));
+  return { ok: true };
+}
+
+function adminSession(token) {
+  try {
+    adminGuard_(token);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false };
+  }
+}
+
+function adminGuard_(token) {
+  var value = CacheService.getScriptCache().get(ADMIN.tokenPrefix + String(token || ''));
+  if (!value) {
+    throw new Error('Sesi admin berakhir. Silakan login ulang.');
+  }
+}
+
+function hashAdminPassword_(salt, password) {
+  var bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    salt + ':' + password,
+    Utilities.Charset.UTF_8
+  );
+  return bytes.map(function (b) {
+    var hex = (b & 0xff).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  }).join('');
+}
+
+function safeEqual_(a, b) {
+  if (String(a).length !== String(b).length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+function logAdmin_(aksi, entitas, id, detail) {
+  try {
+    var ss = ensureDatabase_();
+    var sheet = ss.getSheetByName(ADMIN.logSheet) || buildSheet_(ss, ADMIN.logSheet);
+    sheet.appendRow([
+      Utilities.formatDate(new Date(), APP.timezone, 'yyyy-MM-dd HH:mm:ss'),
+      text_(aksi, 60),
+      text_(entitas, 60),
+      text_(id, 80),
+      text_(detail, 900)
+    ]);
+  } catch (err) {
+    // logging tidak boleh mengganggu operasi utama
+  }
+}
+
+/** Mengembalikan daftar data satu entitas (termasuk Profil, PPDB, Pesan). */
+function adminList(entity, token) {
+  adminGuard_(token);
+
+  var name = String(entity || '');
+  if (!SCHEMA[name]) {
+    throw new Error('Entitas tidak dikenal: ' + name);
+  }
+
+  var ss = ensureDatabase_();
+  var table = readTable_(ss, name);
+  return { entity: name, headers: table.headers, rows: rowsToObjects_(name, table.headers, table.entries) };
+}
+
+/** Create bila record.id kosong, Update bila record.id terisi. */
+function adminSave(entity, record, token) {
+  adminGuard_(token);
+
+  var name = String(entity || '');
+  var spec = ADMIN_ENTITIES[name];
+  if (!spec) {
+    throw new Error('Entitas ini tidak bisa disimpan lewat admin: ' + name);
+  }
+
+  var data = record && typeof record === 'object' ? record : {};
+  var errors = validateEntity_(spec, data);
+  if (errors.length) {
+    throw new Error(errors.join(' '));
+  }
+
+  var ss = ensureDatabase_();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    var sheet = ss.getSheetByName(name) || buildSheet_(ss, name);
+    var headers = SCHEMA[name];
+    var values = sheet.getDataRange().getValues();
+    var rowValues = headers.map(function (header) {
+      return cell_(text_(data[header], 3000));
+    });
+    var idValue = text_(data.id, 60);
+
+    var rowIndex = idValue ? findRowByIndex_(values, idValue) : -1;
+    if (idValue && rowIndex === -1) {
+      throw new Error('ID "' + idValue + '" tidak ditemukan di sheet ' + name + '.');
+    }
+
+    var created = rowIndex === -1;
+    var savedId;
+
+    if (created) {
+      savedId = nextId_(values, spec.idPrefix);
+      rowValues[0] = savedId;
+      sheet.appendRow(rowValues);
+    } else {
+      savedId = idValue;
+      sheet.getRange(rowIndex, 1, 1, headers.length).setValues([rowValues]);
+    }
+
+    invalidateCache_();
+    logAdmin_(created ? 'tambah' : 'ubah', name, savedId, text_(data.judul || data.nama, 200));
+
+    return { ok: true, created: created, id: savedId };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Delete permanen; salinan baris disimpan di sheet Log. */
+function adminDelete(entity, id, token) {
+  adminGuard_(token);
+
+  var name = String(entity || '');
+  if (!ADMIN_ENTITIES[name]) {
+    throw new Error('Entitas ini tidak bisa dihapus lewat admin: ' + name);
+  }
+
+  var idValue = text_(id, 60);
+  if (!idValue) {
+    throw new Error('ID tidak boleh kosong.');
+  }
+
+  var ss = ensureDatabase_();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) {
+      throw new Error('Sheet tidak ditemukan: ' + name);
+    }
+
+    var values = sheet.getDataRange().getValues();
+    var rowIndex = findRowByIndex_(values, idValue);
+    if (rowIndex === -1) {
+      throw new Error('ID "' + idValue + '" tidak ditemukan.');
+    }
+
+    var backup = values[rowIndex - 1].join(' | ');
+    logAdmin_('hapus', name, idValue, backup);
+    sheet.deleteRow(rowIndex);
+    invalidateCache_();
+
+    return { ok: true, id: idValue };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Simpan banyak kunci/nilai sekaligus untuk sheet Profil dan PPDB. */
+function adminSaveKV(entity, rows, token) {
+  adminGuard_(token);
+
+  var name = String(entity || '');
+  if (name !== 'Profil' && name !== 'PPDB') {
+    throw new Error('Entitas key-value tidak dikenal: ' + name);
+  }
+  if (!rows || !Array.isArray(rows)) {
+    throw new Error('Data harus berupa daftar kunci/nilai.');
+  }
+
+  var ss = ensureDatabase_();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    var sheet = ss.getSheetByName(name) || buildSheet_(ss, name);
+    var values = sheet.getDataRange().getValues();
+    var keyRow = {};
+
+    for (var i = 1; i < values.length; i++) {
+      var key = String(values[i][0]).trim().toLowerCase();
+      if (key) {
+        keyRow[key] = i + 1;
+      }
+    }
+
+    var updates = 0;
+    rows.forEach(function (row) {
+      var kunci = text_(row && row.kunci, 120);
+      if (!kunci) return;
+
+      var target = keyRow[kunci.toLowerCase()];
+      if (target) {
+        sheet.getRange(target, 2).setValue(cell_(text_(row.nilai, 5000)));
+        updates++;
+      }
+    });
+
+    invalidateCache_();
+    logAdmin_('simpan_kv', name, '', updates + ' kunci diperbarui.');
+
+    return { ok: true, updated: updates };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function adminSetPesanStatus(rowNumber, status, token) {
+  adminGuard_(token);
+
+  var allowed = ['Baru', 'Sudah dibalas'];
+  if (allowed.indexOf(status) === -1) {
+    throw new Error('Status tidak valid.');
+  }
+
+  var row = Number(rowNumber);
+  if (!row || row < 2) {
+    throw new Error('Nomor baris tidak valid.');
+  }
+
+  var ss = ensureDatabase_();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    var sheet = ss.getSheetByName('Pesan');
+    if (!sheet) {
+      throw new Error('Sheet Pesan tidak ditemukan.');
+    }
+    if (row > sheet.getLastRow()) {
+      throw new Error('Baris tidak ditemukan.');
+    }
+    if (!String(sheet.getRange(row, 1).getValue()).trim()) {
+      throw new Error('Baris tidak berisi data.');
+    }
+
+    sheet.getRange(row, 7).setValue(status);
+    SpreadsheetApp.flush();
+    logAdmin_('status_pesan', 'Pesan', 'baris ' + row, status);
+
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function adminDeletePesan(rowNumber, token) {
+  adminGuard_(token);
+
+  var row = Number(rowNumber);
+  if (!row || row < 2) {
+    throw new Error('Nomor baris tidak valid.');
+  }
+
+  var ss = ensureDatabase_();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    var sheet = ss.getSheetByName('Pesan');
+    if (!sheet || row > sheet.getLastRow()) {
+      throw new Error('Baris tidak ditemukan.');
+    }
+
+    var backup = sheet.getRange(row, 1, 1, 7).getValues()[0].join(' | ');
+    logAdmin_('hapus', 'Pesan', 'baris ' + row, backup);
+    sheet.deleteRow(row);
+    invalidateCache_();
+
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Jumlah baris data per sheet untuk dashboard admin. */
+function adminStats(token) {
+  adminGuard_(token);
+
+  var ss = ensureDatabase_();
+  var stats = {};
+
+  Object.keys(SCHEMA).forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    stats[name] = sheet ? Math.max(0, sheet.getLastRow() - 1) : 0;
+  });
+
+  return stats;
+}
+
+/* ------------------------------ helpers ------------------------------ */
+
+function readTable_(ss, name) {
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    return { headers: SCHEMA[name] || [], entries: [] };
+  }
+
+  var values = sheet.getDataRange().getValues();
+  if (!values.length) {
+    return { headers: SCHEMA[name] || [], entries: [] };
+  }
+
+  var headers = values.shift().map(function (h) {
+    return String(h).trim();
+  });
+
+  var entries = values.map(function (row, index) {
+    return { row: index + 2, cells: row || [] };
+  }).filter(function (entry) {
+    return entry.cells.some(function (cell) {
+      return cell !== '' && cell != null;
+    });
+  });
+
+  return { headers: headers, entries: entries };
+}
+
+function rowsToObjects_(name, headers, entries) {
+  var fields = SCHEMA[name] || [];
+
+  return entries.map(function (entry) {
+    var obj = { _row: entry.row };
+
+    headers.forEach(function (header, index) {
+      var cell = entry.cells[index];
+      if (cell instanceof Date) {
+        obj[header] = Utilities.formatDate(cell, APP.timezone, 'yyyy-MM-dd');
+      } else {
+        obj[header] = cell == null ? '' : String(cell).trim();
+      }
+    });
+
+    fields.forEach(function (field) {
+      if (typeof obj[field] === 'undefined') {
+        obj[field] = '';
+      }
+    });
+
+    return obj;
+  });
+}
+
+function validateEntity_(spec, data) {
+  var errors = [];
+
+  spec.required.forEach(function (field) {
+    if (!text_(data[field], 0)) {
+      errors.push('Kolom "' + field + '" wajib diisi.');
+    }
+  });
+
+  spec.dateFields.forEach(function (field) {
+    var value = text_(data[field], 0);
+    if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      errors.push('Format "' + field + '" harus YYYY-MM-DD.');
+    }
+  });
+
+  return errors;
+}
+
+function findRowByIndex_(values, idValue) {
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0]).trim() === idValue) {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
+function escapeRegExp_(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function nextId_(values, prefix) {
+  var pattern = new RegExp('^' + escapeRegExp_(prefix) + '(\\d+)$');
+  var max = 0;
+
+  for (var i = 1; i < values.length; i++) {
+    var match = String(values[i][0] || '').trim().match(pattern);
+    if (match) {
+      max = Math.max(max, parseInt(match[1], 10));
+    }
+  }
+
+  return prefix + String(max + 1).padStart(3, '0');
 }
 
 /* =====================================================================

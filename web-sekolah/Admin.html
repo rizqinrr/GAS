@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>Admin - Website Sekolah</title>
+  <?!= include('AdminStyles'); ?>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="loginView">
+    <form class="login-card" id="loginForm">
+      <div class="login-mark" aria-hidden="true">SD3</div>
+      <h1>Panel Admin</h1>
+      <p class="sub">Masuk dengan password admin untuk mengelola isi website sekolah.</p>
+
+      <div id="loginError" class="login-error hidden" role="alert"></div>
+
+      <div class="field" id="fieldPassword">
+        <label for="passwordInput">Password</label>
+        <input id="passwordInput" name="password" type="password" autocomplete="current-password" required>
+      </div>
+
+      <button type="submit" id="loginButton" class="btn block">Masuk</button>
+      <p class="login-foot">Panel ini hanya untuk pengelola sekolah.<br>Website pengunjung tetap di URL /exec tanpa ?page=admin.</p>
+    </form>
+  </div>
+
+  <div id="appView" class="hidden">
+    <header class="admin-head">
+      <div class="admin-head-inner">
+        <div class="mark" aria-hidden="true">SD3</div>
+        <div class="titles">
+          <strong>Panel Admin</strong>
+          <small>SD Negeri Semanu III - Google Sheets</small>
+        </div>
+        <button type="button" class="btn ghost sm" id="logoutButton">Keluar</button>
+      </div>
+    </header>
+
+    <div class="admin-wrap">
+      <nav class="tabs" id="tabs" aria-label="Pilih data"></nav>
+
+      <div class="bar">
+        <h2 id="panelTitle">Data</h2>
+        <div class="actions">
+          <span class="count" id="panelCount"></span>
+          <button type="button" class="btn sm" id="reloadButton" title="Muat ulang data">Muat ulang</button>
+          <button type="button" class="btn sm" id="addButton">Tambah</button>
+        </div>
+      </div>
+
+      <div class="table-box" id="tableBox">
+        <table class="grid" id="dataTable">
+          <thead id="tableHead"></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty hidden">Belum ada data.</div>
+        <div id="loadingState" class="empty hidden">Memuat data...</div>
+        <div id="kvBox" class="hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="toastRoot"></div>
+
+  <?!= include('AdminJavaScript'); ?>
+</body>
+</html>

@@ -1,4 +1,4 @@
-# Website Sekolah - SD Negeri Semanu III (Google Apps Script)
+﻿# Website Sekolah - SD Negeri Semanu III (Google Apps Script)
 
 Prototipe website sekolah berbasis **Google Apps Script** dengan **Google Sheets sebagai database**.
 Dibuat untuk keperluan **tugas Analisis Kebutuhan Website**.
@@ -20,11 +20,12 @@ Dibuat untuk keperluan **tugas Analisis Kebutuhan Website**.
 3. [Cara pasang (copy-paste manual)](#3-cara-pasang-copy-paste-manual)
 4. [Struktur database](#4-struktur-database)
 5. [Tutorial penggunaan untuk pengunjung](#5-tutorial-penggunaan-untuk-pengunjung)
-6. [Tutorial mengelola konten (admin)](#6-tutorial-mengelola-konten-admin)
-7. [Mengubah kode dan deploy ulang](#7-mengubah-kode-dan-deploy-ulang)
-8. [Catatan teknis](#8-catatan-teknis)
-9. [Troubleshooting](#9-troubleshooting)
-10. [Checklist demo/presentasi](#10-checklist-demopresentasi)
+6. [Tutorial mengelola konten manual (admin)](#6-tutorial-mengelola-konten-manual-admin)
+7. [Panel admin: CRUD lewat website](#7-panel-admin-crud-lewat-website)
+8. [Mengubah kode dan deploy ulang](#8-mengubah-kode-dan-deploy-ulang)
+9. [Catatan teknis](#9-catatan-teknis)
+10. [Troubleshooting](#10-troubleshooting)
+11. [Checklist demo/presentasi](#11-checklist-demopresentasi)
 
 ---
 
@@ -56,44 +57,52 @@ Catatan kecil:
 ```
 web-sekolah/
 ├── appsscript.json   # manifest (timezone, runtime V8)
-├── Code.gs           # backend: doGet, setup database, API data, simpan pesan
-├── Index.html        # struktur halaman (shell + semua section)
-├── Styles.html       # CSS (di-include ke Index)
-└── JavaScript.html   # render data, pencarian, filter galeri, form
+├── Code.gs           # backend: doGet, setup database, API data, pesan, admin CRUD
+├── Index.html        # struktur halaman publik (shell + semua section)
+├── Styles.html       # CSS publik (di-include ke Index)
+├── JavaScript.html   # render data, pencarian, filter galeri, form
+├── Admin.html        # shell panel admin (?page=admin)
+├── AdminStyles.html  # CSS admin (di-include ke Admin)
+└── AdminJavaScript.html # login admin, tabel, form CRUD
 ```
 
 ---
 
 ## 3. Cara pasang (copy-paste manual)
 
-1. Buka <https://script.google.com> → **New project**.
+1. Buka <https://script.google.com> â†’ **New project**.
 2. Ganti nama project, misal `Website SD Negeri Semanu III`.
-3. Buka **Project Settings** (ikon gerigi) → centang **Show "appsscript.json" manifest file**.
+3. Buka **Project Settings** (ikon gerigi) â†’ centang **Show "appsscript.json" manifest file**.
 4. Buka `appsscript.json` di editor, tempel isi `appsscript.json` dari folder ini.
 5. Buka `Code.gs`, tempel seluruh isi `Code.gs`.
-6. Tambahkan 3 file HTML: tombol **+** → **HTML**.
-   - beri nama `Index` → tempel `Index.html`
-   - beri nama `Styles` → tempel `Styles.html`
-   - beri nama `JavaScript` → tempel `JavaScript.html`
+6. Tambahkan 3 file HTML: tombol **+** â†’ **HTML**.
+   - beri nama `Index` â†’ tempel `Index.html`
+   - beri nama `Styles` â†’ tempel `Styles.html`
+   - beri nama `JavaScript` â†’ tempel `JavaScript.html`
    - **Nama file harus sama persis** (huruf besar/kecil berpengaruh).
-7. Simpan (Ctrl+S), lalu pilih fungsi **`setupDatabase`** pada dropdown → **Run**.
+7. Simpan (Ctrl+S), lalu pilih fungsi **`setupDatabase`** pada dropdown â†’ **Run**.
    - Izinkan akses saat diminta (Google Sheets + Drive).
    - Buka **Execution log**: akan muncul URL spreadsheet database.
-   - Spreadsheet `DB - Website SD Negeri Semanu III` otomatis dibuat berisi 11 sheet + data contoh.
-8. **Deploy** → **New deployment** → pilih **Web app**.
+   - Spreadsheet `DB - Website SD Negeri Semanu III` otomatis dibuat berisi 11 sheet data + sheet Log + data contoh.
+8. **Deploy** â†’ **New deployment** â†’ pilih **Web app**.
    - Description: `v1`
    - Execute as: **Me**
    - Who has access: **Anyone** (atau *Anyone with Google account*)
-   - **Deploy** → salin URL web app.
+   - **Deploy** â†’ salin URL web app.
 9. Buka URL tersebut. Kalau muncul "Data gagal dimuat", jalankan `setupDatabase` sekali lagi lalu reload.
 
 > URL spreadsheet juga bisa dilihat kapan saja dengan menjalankan fungsi `showDatabaseUrl()`.
+
+> **Lokasi database.** Spreadsheet dibuat di folder yang sama dengan project Apps Script bila memungkinkan.
+> Kalau folder project tidak terbaca, file dibuat di My Drive. Untuk menentukan folder sendiri, jalankan
+> `aturFolderDatabase('URL_ATAU_ID_FOLDER')`; untuk kembali ke default jalankan `aturFolderDatabase('')`.
+> Memindahkan file secara manual lewat Drive juga aman karena koneksi memakai ID spreadsheet, bukan path.
 
 ---
 
 ## 4. Struktur database
 
-Spreadsheet dibuat otomatis, terdiri dari 11 sheet:
+Spreadsheet dibuat otomatis, terdiri dari 12 sheet (11 data + 1 log):
 
 | Sheet | Isi |
 |-------|-----|
@@ -108,6 +117,7 @@ Spreadsheet dibuat otomatis, terdiri dari 11 sheet:
 | `Program` | id, nama, deskripsi |
 | `PPDB` | key-value: status, periode, kuota, persyaratan, alur, dsb. |
 | `Pesan` | timestamp, nama, email, telepon, subjek, pesan, status |
+| `Log` | log admin: timestamp, aksi, entitas, id, detail |
 
 Aturan umum saat mengedit:
 
@@ -115,7 +125,25 @@ Aturan umum saat mengedit:
 - Format tanggal wajib `YYYY-MM-DD` (contoh `2026-10-24`).
 - Baris baru ditambahkan di bawah; kolom `id` harus unik (contoh `P-006`).
 - Urutan tampilan diatur otomatis oleh kode: pengumuman (penting lalu terbaru), agenda & kalender (terdekat), prestasi & galeri (terbaru).
-- Perubahan tampil paling lambat **±2 menit** karena cache. Ingin langsung? Lihat [bagian 6.11](#611-membuat-perubahan-langsung-tampil).
+- Perubahan tampil paling lambat **Â±2 menit** karena cache. Ingin langsung? Lihat [bagian 6.11](#611-membuat-perubahan-langsung-tampil).
+
+### 4.1 Lokasi spreadsheet dan cara menemukannya
+
+- Saat dibuat, spreadsheet otomatis dipindahkan ke **folder project Apps Script** (best effort).
+  Bila folder project tidak dapat dibaca, file tetap di **My Drive**.
+- Koneksi database disimpan di Script Properties (`DB_ID`). Karena itu, memindahkan file lewat Drive
+  **tidak merusak** website.
+- Untuk mengecek lokasi dan isi database, jalankan fungsi **`cekDatabase`**. Execution log akan menampilkan:
+  akun, URL spreadsheet, folder, dan daftar 12 sheet.
+- Untuk memilih folder sendiri:
+
+  1. Buka folder di Drive, salin URL-nya (contoh `https://drive.google.com/drive/folders/ABC123`).
+  2. Di editor Apps Script, jalankan `aturFolderDatabase('https://drive.google.com/drive/folders/ABC123')`.
+  3. Spreadsheet yang sudah ada langsung dipindahkan ke folder tersebut.
+  4. Untuk kembali ke default: `aturFolderDatabase('')`.
+
+- Kalau ingin memindahkan manual: klik kanan file `DB - Website SD Negeri Semanu III` â†’
+  **Move to** â†’ pilih folder tujuan. Tidak perlu redeploy.
 
 ---
 
@@ -139,7 +167,7 @@ Gunakan menu di bawah header: **Beranda, Profil, Pengumuman, Agenda, Kalender, P
 1. Ketuk/klik kolom **"Cari pengumuman, agenda, prestasi..."** di header.
 2. Ketik minimal **2 huruf** (contoh: `ppdb`, `pramuka`, `juara`).
 3. Daftar hasil muncul lengkap dengan kategorinya.
-4. Klik salah satu hasil → halaman otomatis bergulir ke bagian yang dimaksud dan kartunya diberi sorotan.
+4. Klik salah satu hasil â†’ halaman otomatis bergulir ke bagian yang dimaksud dan kartunya diberi sorotan.
 
 ### 5.4 Membaca pengumuman
 
@@ -180,16 +208,17 @@ Klik **Kirim Pesan**. Jika berhasil, muncul notifikasi dan formulir dikosongkan.
 
 ---
 
-## 6. Tutorial mengelola konten (admin)
+## 6. Tutorial mengelola konten manual (admin)
 
 Bagian ini untuk operator sekolah/guru yang akan memperbarui isi website. **Tidak perlu coding**, cukup edit spreadsheet.
 
 ### 6.1 Membuka database
 
 1. Buka editor Apps Script project website.
-2. Pilih fungsi **`showDatabaseUrl`** → **Run**.
-3. Buka **Execution log** → klik URL spreadsheet yang muncul.
-4. Simpan URL tersebut sebagai bookmark, misal folder Drive `Website Sekolah`.
+2. Pilih fungsi **`showDatabaseUrl`** â†’ **Run**.
+3. Buka **Execution log** â†’ klik URL spreadsheet yang muncul.
+4. Ingin tahu folder dan kelengkapan sheet? Jalankan **`cekDatabase`**.
+5. Simpan URL tersebut sebagai bookmark, misal folder Drive `Website Sekolah`.
 
 ### 6.2 Mengganti profil dan kontak
 
@@ -198,7 +227,7 @@ Buka sheet **`Profil`**. Isinya dua kolom: `kunci` dan `nilai`. Edit kolom `nila
 | Kunci | Contoh isi | Muncul di |
 |-------|------------|-----------|
 | `nama_sekolah` | SD Negeri Semanu III | Header, hero, footer, judul tab |
-| `npsn` | 2040xxxx | — (dicadangkan) |
+| `npsn` | 2040xxxx | â€” (dicadangkan) |
 | `akreditasi` | B | Chip di hero |
 | `alamat` | Munggi Pasar, Semanu, ... | Hero, kontak, footer |
 | `telepon` | (0274) 000000 | Hero, kontak |
@@ -219,7 +248,7 @@ Tips:
 - **Sambutan**: pisahkan paragraf dengan **satu baris kosong**.
 - **Misi**: tulis satu poin per baris. Nomor otomatis ditampilkan, jadi tidak perlu menulis "1.", "2.".
 - **WhatsApp**: tulis nomor format internasional tanpa `+`, misal `6281234567890`. Nomor `0812...` juga otomatis diubah.
-- **Maps**: buka lokasi di Google Maps → **Share/Bagikan** → **Copy link** → tempel di `maps_url`.
+- **Maps**: buka lokasi di Google Maps â†’ **Share/Bagikan** â†’ **Copy link** â†’ tempel di `maps_url`.
 
 ### 6.3 Menambah pengumuman
 
@@ -275,7 +304,7 @@ Sheet **`Galeri`**, kolom: `id, tanggal, judul, kategori, tipe, media_url, deskr
 Langkah mengisi foto dari Google Drive:
 
 1. Upload foto ke Google Drive.
-2. Klik kanan file → **Share/Bagikan** → **General access** → **Anyone with the link** (Viewer).
+2. Klik kanan file â†’ **Share/Bagikan** â†’ **General access** â†’ **Anyone with the link** (Viewer).
 3. Copy link. Bentuknya: `https://drive.google.com/file/d/FILE_ID/view?usp=sharing`
 4. Ubah menjadi: `https://drive.google.com/uc?export=view&id=FILE_ID`
 5. Tempel hasilnya di kolom `media_url`, isi `tipe` dengan **Foto**.
@@ -327,33 +356,91 @@ Tidak perlu deploy ulang karena hanya data spreadsheet yang berubah.
 
 ---
 
-## 7. Mengubah kode dan deploy ulang
+## 7. Panel admin: CRUD lewat website
+
+Selain mengedit spreadsheet manual, tersedia panel admin bawaan untuk mengelola konten lewat browser.
+
+### 7.1 Struktur file admin
+
+```
+web-sekolah/
+├── Admin.html            # shell halaman admin
+├── AdminStyles.html      # CSS admin (di-include ke Admin)
+└── AdminJavaScript.html  # logika login, tabel, form modal
+```
+
+Panel diakses di URL web app yang sama dengan tambahan `?page=admin`:
+
+```
+https://script.google.com/macros/s/AKfycb.../exec?page=admin
+```
+
+### 7.2 Mengatur password admin (sekali saja)
+
+1. Copy 3 file admin di atas ke editor Apps Script.
+2. Jalankan fungsi **`setAdminPassword('passwordKamu')`** dari editor
+   (dropdown fungsi manual, isi argumen saat diminta atau tulis sementara lalu ganti).
+3. Password disimpan sebagai **hash SHA-256 + salt** di Script Properties, bukan teks asli.
+4. Deploy **New version**, lalu buka `?page=admin`.
+
+Catatan: `setAdminPassword` bisa dijalankan kembali kapan saja untuk mengganti password.
+
+### 7.3 Yang bisa dikelola di panel
+
+| Tab | Form | Keterangan |
+|-----|------|-----------|
+| Pengumuman, Agenda, Kalender, Prestasi, Galeri, Guru, Fasilitas, Program | tabel + modal | Tambah, edit, hapus; ID dibuat otomatis (P-006 dst.) |
+| Profil, PPDB | daftar kunci/nilai | Edit nilai; kunci mengikuti sheet |
+| Pesan | tabel + tombol status | Tandai **Sudah dibalas**, balas via email, hapus |
+
+Setiap perubahan otomatis menghapus cache, jadi tampil di halaman pengunjung seketika.
+
+### 7.4 Keamanan yang berlaku
+
+- Password salah 5 kali → login diblokir ±15 menit.
+- Sesi login berlaku ±6 jam (token di `CacheService`); setelah itu login ulang.
+- Hapus bersifat permanen, tetapi salinan baris dicatat di sheet **`Log`** sehingga bisa dikembalikan manual.
+- Semua fungsi admin memvalidasi token di server, bukan hanya menyembunyikan tombol.
+- Password yang dikirim lewat `google.script.run` berjalan di HTTPS Apps Script.
+
+### 7.5 Mengembalikan data terhapus
+
+1. Buka sheet **`Log`** di spreadsheet database.
+2. Cari baris dengan aksi `hapus`; kolom `detail` berisi salinan data.
+3. Tempel kembali baris tersebut ke sheet asalnya (tambah baris baru di bawah).
+
+---
+
+## 8. Mengubah kode dan deploy ulang
 
 Kalau mengubah `Code.gs`, `Index.html`, `Styles.html`, atau `JavaScript.html`:
 
 1. Simpan file (Ctrl+S).
-2. **Deploy** → **Manage deployments**.
+2. **Deploy** â†’ **Manage deployments**.
 3. Klik ikon pensil pada deployment aktif.
 4. Pada **Version**, pilih **New version**.
 5. Klik **Deploy**. URL web app tetap sama.
 
-Cara cepat untuk uji coba: **Deploy** → **Test deployments** → buka URL `/dev`.
+Cara cepat untuk uji coba: **Deploy** â†’ **Test deployments** â†’ buka URL `/dev`.
 
 ---
 
-## 8. Catatan teknis
+## 9. Catatan teknis
 
-- Runtime Apps Script dibatasi ±6 menit per eksekusi; project ini ringan karena membaca semua sheet sekaligus.
+- Runtime Apps Script dibatasi Â±6 menit per eksekusi; project ini ringan karena membaca semua sheet sekaligus.
 - Data di-cache 120 detik agar cepat dan hemat kuota.
 - `doGet` memanggil `ensureDatabase_()`, jadi database tetap dibuat otomatis walau langkah `setupDatabase` terlewat.
 - Formulir kontak: validasi di client dan server, escaping sel untuk mencegah formula injection,
   serta pembatasan 3 kiriman per jam per alamat email.
 - Email notifikasi otomatis tidak diaktifkan agar tidak memakai kuota Gmail; cek sheet `Pesan` secara berkala.
-- URL spreadsheet tidak dikirim ke browser pengunjung; admin melihatnya lewat `showDatabaseUrl()`.
+- URL spreadsheet tidak dikirim ke browser pengunjung; admin melihatnya lewat `showDatabaseUrl()` atau `cekDatabase()`.
+- Database dipindahkan ke folder project memakai `DriveApp`, sehingga manifest meminta scope
+  `spreadsheets`, `drive`, dan `userinfo.email`. Setelah mengganti manifest, jalankan `setupDatabase`
+  sekali lagi untuk menyetujui izin baru.
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Gejala | Penyebab & solusi |
 |--------|-------------------|
@@ -364,17 +451,25 @@ Cara cepat untuk uji coba: **Deploy** → **Test deployments** → buka URL `/de
 | Menu tidak muncul di HP | Pastikan file `Styles.html` terpasang dan nama file include benar. |
 | Web app minta login | Ubah deployment access ke **Anyone**, lalu buat deployment baru. |
 | Perubahan kode tidak terlihat | Deploy ulang dengan **New version**. |
-| Pesan tidak terkirim | Cek validasi: nama ≥3 karakter, email valid, pesan ≥10 karakter, maksimal 3 pesan/jam. |
+| Pesan tidak terkirim | Cek validasi: nama â‰¥3 karakter, email valid, pesan â‰¥10 karakter, maksimal 3 pesan/jam. |
+| Klik menu pindah ke `userCodeAppPanel?createOAuthDialog=true#...` | Penyebabnya `<base target="_top">` + anchor `#`. Versi terbaru sudah memakai `target="_self"` + scroll via JavaScript. Pastikan `Index.html` dan `JavaScript.html` terbaru, lalu deploy **New version**. |
+| Spreadsheet tidak ada di folder project | Project standalone tidak selalu punya folder yang terbaca. Jalankan `cekDatabase` untuk melihat lokasi, atau `aturFolderDatabase('ID_FOLDER')` untuk memindahkannya. |
+| Muncul permintaan izin baru setelah update | Manifest menambah scope Drive. Setujui dengan menjalankan `setupDatabase` sekali di editor. |
+| Login admin diblokir | 5 password salah dalam 15 menit. Tunggu, atau jalankan `refreshCache` di editor untuk membersihkan hitungan gagal. |
+| "Password admin belum diatur" | Jalankan `setAdminPassword('password')` di editor, lalu login ulang. |
+| "Sesi admin berakhir" di panel admin | Token kadaluarsa (±6 jam) atau cache di-reset. Login ulang. |
+| Admin bilang ID tidak ditemukan | Sheet diubah manual dan ID kehilangan. Jangan ubah kolom `id`, atau buat baris baru. |
+| Tambah/ubah/hapus muncul error tanggal | Format tanggal wajib `YYYY-MM-DD`; gunakan input date di modal. |
 
 ---
 
-## 10. Checklist demo/presentasi
+## 11. Checklist demo/presentasi
 
 1. Buka URL web app di jendela **incognito** untuk membuktikan bisa diakses tanpa login.
 2. Tunjukkan 8 bagian sesuai requirement: Pengumuman, Profil, Agenda, Kalender, Prestasi, Galeri, PPDB, Kontak.
 3. Coba pencarian dengan kata `ppdb` dan `pramuka`.
 4. Filter galeri ke kategori **Prestasi**, lalu buka salah satu kartu.
 5. Kirim satu pesan lewat formulir, lalu buka sheet `Pesan` untuk menunjukkan data masuk.
-6. Tampilkan tampilan HP (DevTools → mode responsif 390 px).
+6. Tampilkan tampilan HP (DevTools â†’ mode responsif 390 px).
 7. Tunjukkan spreadsheet database dan struktur sheet sebagai bukti "database".
 8. Tutup dengan disclaimer: semua data masih **data contoh** untuk keperluan tugas.
